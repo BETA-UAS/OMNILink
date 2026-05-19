@@ -1,5 +1,6 @@
 {
   "mediamtx_bin_default": "/usr/local/bin/mediamtx",
+  "ping_interval_ms": 300000,
   "telemetry": {
     "default_target_port": 14550,
     "targets": {

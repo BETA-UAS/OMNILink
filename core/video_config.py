@@ -12,6 +12,8 @@ FPS_CHOICES = ["10", "15", "20", "25", "30", "60"]
 X264_PARAMS = (
     "nal-hrd=none:force-cfr=1:sliced-threads=1:sync-lookahead=0:rc-lookahead=0:bframes=0:ref=1"
 )
+RTSP_IO_TIMEOUT_US = 5_000_000
+FFMPEG_PROGRESS_INTERVAL_SEC = 1
 
 
 def looks_like_rtsp(url: str) -> bool:
@@ -76,6 +78,11 @@ def build_ffmpeg_args(
     args: List[str] = [
         "-loglevel",
         "error",
+        "-nostats",
+        "-progress",
+        "pipe:1",
+        "-stats_period",
+        str(FFMPEG_PROGRESS_INTERVAL_SEC),
         "-fflags",
         "nobuffer",
         "-flags",
@@ -85,7 +92,14 @@ def build_ffmpeg_args(
 
     if source.vtype == VIDEO_TYPE_RTSP:
         gop = 30
-        args += ["-rtsp_transport", "tcp", "-i", source.input_text.strip()]
+        args += [
+            "-rtsp_transport",
+            "tcp",
+            "-stimeout",
+            str(RTSP_IO_TIMEOUT_US),
+            "-i",
+            source.input_text.strip(),
+        ]
     else:
         gop = int(webcam_fps)
         args += [

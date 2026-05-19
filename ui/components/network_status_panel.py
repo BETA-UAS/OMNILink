@@ -22,6 +22,7 @@ class NetworkStatusPanel(QtWidgets.QGroupBox):
         self.ping_cards = []
         self._status_cols = 0
         self._relayout_pending = False
+        self._paused = False
 
         self.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
 
@@ -93,8 +94,21 @@ class NetworkStatusPanel(QtWidgets.QGroupBox):
         self.setUpdatesEnabled(True)
 
     def set_refreshing(self, refreshing: bool) -> None:
+        if self._paused:
+            return
+
         self.btn_ping_refresh.setEnabled(not refreshing)
         self.btn_ping_refresh.setText("Refreshing..." if refreshing else "Refresh")
+
+    def set_paused(self, paused: bool) -> None:
+        self._paused = paused
+        self.btn_ping_refresh.setEnabled(not paused)
+        self.btn_ping_refresh.setText("Paused" if paused else "Refresh")
+        self.btn_ping_refresh.setToolTip(
+            "Ping paused while video or MAVLink router is running" if paused else ""
+        )
+        if paused:
+            self.lbl_ping_summary.setText("Devices: ping paused")
 
     def apply_results(self, results: Dict[str, bool], devices: List[Dict[str, str]]) -> None:
         connected = 0
