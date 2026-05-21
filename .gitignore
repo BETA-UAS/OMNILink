@@ -24,6 +24,15 @@ dist/
 *.egg-info/
 *.egg
 
+# AppImage local build artifacts
+.venv-appimage/
+packaging/appimage/
+scripts/
+*.AppImage
+*.AppImage.zsync
+appimagetool-*.AppImage
+omnilink.spec
+
 # Local environment and secrets
 .env
 .env.*

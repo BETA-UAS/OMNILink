@@ -10,6 +10,12 @@ from ui.main_window import MainWindow
 from ui.styles import apply_styles
 
 
+def app_base_path() -> Path:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)
+    return Path(__file__).resolve().parent
+
+
 def setup_logging():
     logging.basicConfig(
         level=logging.INFO,
@@ -21,8 +27,10 @@ def setup_logging():
 def load_config(config_path: str = "config/settings.json") -> dict:
     try:
         path = Path(config_path)
+        if not path.is_absolute():
+            path = app_base_path() / path
         if not path.exists():
-            logging.warning(f"Config file not found at {config_path}.")
+            logging.warning(f"Config file not found at {path}.")
             return {}  # Fallback to empty dict for the default config
 
         with open(path, "r") as f:
