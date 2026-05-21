@@ -10,6 +10,8 @@ from ui.components.common import (
     set_status_label,
 )
 
+DEFAULT_MANUAL_CAMERA_ADDRESS = "rtsp://192.168.144.25:8554/main.264"
+
 
 class VideoPanel(QtWidgets.QWidget):
     start_requested = QtCore.pyqtSignal()
@@ -119,11 +121,16 @@ class VideoPanel(QtWidgets.QWidget):
         manual_lay.setSpacing(6)
 
         self.cb_manual_cam = QtWidgets.QCheckBox("Enable Manual Camera Address")
-        self.ed_manual_cam = QtWidgets.QLineEdit("")
-        self.ed_manual_cam.setPlaceholderText("rtsp://192.168.144.xx:554")
+        self.ed_manual_cam = QtWidgets.QLineEdit(DEFAULT_MANUAL_CAMERA_ADDRESS)
+        self.ed_manual_cam.setPlaceholderText(DEFAULT_MANUAL_CAMERA_ADDRESS)
+        self.ed_manual_cam.setEnabled(False)
         manual_lay.addWidget(self.cb_manual_cam)
         manual_lay.addWidget(self.ed_manual_cam)
         sg.addWidget(manual_box, 0)
+
+        self.cb_manual_cam.toggled.connect(self._set_manual_camera_enabled)
+        self.cb_manual_cam.toggled.connect(lambda _checked: self.settings_changed.emit())
+        self.ed_manual_cam.textChanged.connect(lambda _text: self.settings_changed.emit())
 
     def _build_controls(self) -> None:
         video_bottom = QtWidgets.QVBoxLayout()
@@ -278,6 +285,9 @@ class VideoPanel(QtWidgets.QWidget):
         on = self.btn_toggle_vsettings.isChecked()
         self.gb_vctl.setVisible(on)
         self.btn_toggle_vsettings.setText("Hide Video Settings" if on else "Show Video Settings")
+
+    def _set_manual_camera_enabled(self, enabled: bool) -> None:
+        self.ed_manual_cam.setEnabled(enabled)
 
     def _update_video_base_hint(self) -> None:
         self.lbl_out_hint.setText(f"RTSP Base: {self.video_base_url()}")

@@ -16,14 +16,12 @@ class Toolbar(QtWidgets.QWidget):
 
         title = QtWidgets.QLabel("OMNI-Link")
         title.setObjectName("appTitle")
-        subtitle = QtWidgets.QLabel("Video and telemetry routing")
-        subtitle.setObjectName("appSubtitle")
+
 
         title_box = QtWidgets.QVBoxLayout()
         title_box.setContentsMargins(0, 0, 0, 0)
         title_box.setSpacing(1)
         title_box.addWidget(title)
-        title_box.addWidget(subtitle)
         layout.addLayout(title_box)
 
         actions = QtWidgets.QHBoxLayout()
