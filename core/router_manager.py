@@ -62,6 +62,7 @@ class RouterManager(QtCore.QObject):
         self.router_process.setProcessChannelMode(QtCore.QProcess.MergedChannels)
         self.router_process.stateChanged.connect(lambda _state: self.status_changed.emit())
         self.router_process.finished.connect(self._on_router_finished)
+        self.router_process.readyReadStandardOutput.connect(self._log_router_output)
 
         self._effective_tcp_port = 5760
         self._primer: Optional[UdpHeartbeatPrimer] = None
@@ -248,3 +249,19 @@ class RouterManager(QtCore.QObject):
         if not self._stopping:
             logging.info("MAVLink Router process finished.")
         self.status_changed.emit()
+
+    def _log_router_output(self) -> None:
+        try:
+            output = (
+                bytes(self.router_process.readAllStandardOutput())
+                .decode(
+                    "utf-8",
+                    errors="replace",
+                )
+                .strip()
+            )
+        except RuntimeError:
+            return
+
+        if output:
+            logging.debug("MAVLink Router: %s", output)

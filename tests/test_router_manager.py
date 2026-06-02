@@ -1,6 +1,27 @@
 import pytest
 from core.config_models import RouterConfig
 from core.router_config import build_router_config, parse_router_targets
+from core.router_manager import RouterManager
+from PyQt5 import QtCore
+
+
+class FakeRouterProcess:
+    def __init__(self, output: bytes):
+        self.output = output
+        self.read_count = 0
+
+    def readAllStandardOutput(self):
+        self.read_count += 1
+        output = self.output
+        self.output = b""
+        return output
+
+
+def ensure_qt_app():
+    app = QtCore.QCoreApplication.instance()
+    if app is None:
+        app = QtCore.QCoreApplication([])
+    return app
 
 
 def router_config(**overrides):
@@ -78,3 +99,15 @@ def test_build_router_config_with_espusr_udp(monkeypatch):
 
     assert "[UdpEndpoint espusr]" in config_text
     assert "Address=192.168.144.200" in config_text
+
+
+def test_router_output_is_drained_to_avoid_process_backpressure():
+    ensure_qt_app()
+    manager = RouterManager()
+    fake_process = FakeRouterProcess(b"router log line\n")
+    manager.router_process = fake_process
+
+    manager._log_router_output()
+
+    assert fake_process.read_count == 1
+    assert fake_process.output == b""
