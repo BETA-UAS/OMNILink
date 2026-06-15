@@ -20,6 +20,27 @@ class FakeProcess:
         return self._state
 
 
+class FakeSignal:
+    def __init__(self):
+        self.disconnected = False
+
+    def disconnect(self):
+        self.disconnected = True
+
+
+class FakeTimer:
+    def __init__(self):
+        self.timeout = FakeSignal()
+        self.stopped = False
+        self.deleted = False
+
+    def stop(self):
+        self.stopped = True
+
+    def deleteLater(self):
+        self.deleted = True
+
+
 def ensure_qt_app():
     app = QtCore.QCoreApplication.instance()
     if app is None:
@@ -201,3 +222,22 @@ def test_watchdog_schedules_dead_stream_without_stopping_manager(monkeypatch):
     manager._watch()
 
     assert scheduled == ["cam1"]
+
+
+def test_clear_streams_deletes_restart_timers():
+    ensure_qt_app()
+    manager = VideoManager()
+    timer = FakeTimer()
+    runtime = StreamRuntime(
+        source=VideoSource(True, VIDEO_TYPE_RTSP, "rtsp://192.168.144.25:554", "cam1"),
+        restart_timer=timer,
+    )
+    manager.streams = {"cam1": runtime}
+
+    manager._clear_streams()
+
+    assert timer.stopped
+    assert timer.timeout.disconnected
+    assert timer.deleted
+    assert runtime.restart_timer is None
+    assert manager.streams == {}

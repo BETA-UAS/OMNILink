@@ -151,18 +151,32 @@ class VideoManager(QtCore.QObject):
         self._stopping = True
         self.watchdog.stop()
 
-        for key in list(self.streams.keys()):
-            self._stop_ffmpeg_stream(key, intentional=True)
+        self._clear_streams()
 
         if self.mediamtx_process:
             self._stop_process(self.mediamtx_process, "MediaMTX")
             self.mediamtx_process.deleteLater()
             self.mediamtx_process = None
 
-        self.streams = {}
         self._config = None
         self._stopping = False
         self.status_changed.emit()
+
+    def _clear_streams(self) -> None:
+        for key, runtime in list(self.streams.items()):
+            self._stop_ffmpeg_stream(key, intentional=True)
+
+            timer = runtime.restart_timer
+            if timer:
+                timer.stop()
+                try:
+                    timer.timeout.disconnect()
+                except TypeError:
+                    pass
+                timer.deleteLater()
+                runtime.restart_timer = None
+
+        self.streams = {}
 
     def _watch(self) -> None:
         if self._stopping:
