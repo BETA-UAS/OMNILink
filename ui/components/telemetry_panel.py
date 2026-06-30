@@ -12,9 +12,9 @@ class TelemetryPanel(QtWidgets.QGroupBox):
         self._targets_generated = ""
 
         layout = QtWidgets.QGridLayout(self)
-        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setContentsMargins(14, 12, 14, 14)
         layout.setHorizontalSpacing(12)
-        layout.setVerticalSpacing(9)
+        layout.setVerticalSpacing(10)
 
         self._build_presets(layout)
         self._build_targets(layout)
@@ -27,8 +27,8 @@ class TelemetryPanel(QtWidgets.QGroupBox):
         self._apply_tel_profile_ui()
 
     def _build_presets(self, layout: QtWidgets.QGridLayout) -> None:
-        self.rb_hm30 = QtWidgets.QRadioButton("HM30")
-        self.rb_ivcan = QtWidgets.QRadioButton("LambdaLink-3SS")
+        self.rb_hm30 = QtWidgets.QRadioButton("Demonstrator")
+        self.rb_ivcan = QtWidgets.QRadioButton("Omni Trainer")
         self.rb_manual = QtWidgets.QRadioButton("Manual")
         self.rb_ivcan.setChecked(True)
         self.rb_hm30.setVisible(True)
@@ -36,12 +36,13 @@ class TelemetryPanel(QtWidgets.QGroupBox):
 
         preset_box = QtWidgets.QGroupBox("Input Preset")
         preset_box.setObjectName("innerPanel")
-        pv = QtWidgets.QVBoxLayout(preset_box)
+        pv = QtWidgets.QHBoxLayout(preset_box)
         pv.setContentsMargins(12, 10, 12, 10)
-        pv.setSpacing(6)
+        pv.setSpacing(12)
         pv.addWidget(self.rb_hm30)
         pv.addWidget(self.rb_ivcan)
         pv.addWidget(self.rb_manual)
+        pv.addStretch(1)
         layout.addWidget(preset_box, 0, 0, 1, 4)
 
     def _build_targets(self, layout: QtWidgets.QGridLayout) -> None:
@@ -68,11 +69,12 @@ class TelemetryPanel(QtWidgets.QGroupBox):
         self.btn_copy_targets = QtWidgets.QPushButton("Copy Targets")
         set_button_role(self.btn_copy_targets, "secondary")
 
-        tv.addWidget(self.cb_t_pc1, 0, 0)
-        tv.addWidget(self.cb_t_pc2, 0, 1)
+        tv.addWidget(self.cb_t_pc1, 0, 0, 1, 2)
+        tv.addWidget(self.cb_t_pc2, 0, 2, 1, 2)
         tv.addWidget(QtWidgets.QLabel("Port"), 1, 0)
         tv.addWidget(self.sp_target_port, 1, 1)
-        tv.addWidget(self.btn_copy_targets, 1, 2)
+        tv.addWidget(self.btn_copy_targets, 1, 2, 1, 2)
+        tv.setColumnStretch(3, 1)
         layout.addWidget(targets_box, 1, 0, 1, 4)
 
     def _build_instrument_light(self, layout: QtWidgets.QGridLayout) -> None:
@@ -84,7 +86,7 @@ class TelemetryPanel(QtWidgets.QGroupBox):
         tapg.setVerticalSpacing(8)
 
         self.cb_espusr_enable = QtWidgets.QCheckBox("Enable")
-        self.cb_espusr_enable.setChecked(True)
+        self.cb_espusr_enable.setChecked(False)
 
         self.cb_espusr_mode = QtWidgets.QComboBox()
         self.cb_espusr_mode.addItems(["TCP", "UDP"])
@@ -98,11 +100,11 @@ class TelemetryPanel(QtWidgets.QGroupBox):
         tapg.addWidget(self.cb_espusr_enable, 0, 0, 1, 4)
         tapg.addWidget(QtWidgets.QLabel("Mode"), 1, 0)
         tapg.addWidget(self.cb_espusr_mode, 1, 1)
-        tapg.addWidget(QtWidgets.QLabel("IP"), 1, 2)
-        tapg.addWidget(self.ed_espusr_ip, 1, 3)
-        tapg.addWidget(QtWidgets.QLabel("Port"), 2, 0)
-        tapg.addWidget(self.sp_espusr_port, 2, 1)
-        tapg.setColumnStretch(3, 1)
+        tapg.addWidget(QtWidgets.QLabel("Port"), 1, 2)
+        tapg.addWidget(self.sp_espusr_port, 1, 3)
+        tapg.addWidget(QtWidgets.QLabel("IP"), 2, 0)
+        tapg.addWidget(self.ed_espusr_ip, 2, 1, 1, 3)
+        tapg.setColumnStretch(1, 1)
         layout.addWidget(tap_box, 2, 0, 1, 4)
 
     def _build_manual_advanced(self, layout: QtWidgets.QGridLayout) -> None:
@@ -173,6 +175,7 @@ class TelemetryPanel(QtWidgets.QGroupBox):
         mv.addWidget(QtWidgets.QLabel("Targets (Manual)"), 8, 0, 1, 4)
         mv.addWidget(self.txt_targets, 9, 0, 1, 4)
         mv.setColumnStretch(1, 1)
+        mv.setColumnStretch(3, 1)
 
         layout.addWidget(self.manual_box, 3, 0, 1, 4)
         self.manual_box.setVisible(False)

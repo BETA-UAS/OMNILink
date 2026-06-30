@@ -4,6 +4,7 @@ from core.config_models import VideoSource
 from core.video_config import FPS_CHOICES, RES_CHOICES, VIDEO_TYPE_RTSP
 from PyQt5 import QtCore, QtWidgets
 from ui.components.common import (
+    refresh_style,
     set_button_role,
     set_field_value_label,
     set_muted_label,
@@ -23,10 +24,11 @@ class VideoPanel(QtWidgets.QWidget):
         super().__init__(parent)
         self.config = config
         self._out_ip = output_ip
+        self._source_rows = []
 
         self.root_layout = QtWidgets.QVBoxLayout(self)
         self.root_layout.setContentsMargins(0, 0, 0, 0)
-        self.root_layout.setSpacing(10)
+        self.root_layout.setSpacing(8)
 
         self._build_output_section()
         self._build_sources_section()
@@ -34,9 +36,8 @@ class VideoPanel(QtWidgets.QWidget):
         self._build_settings_section()
         self.root_layout.addStretch(1)
 
-        self.add_fixed_camera_row(True, "Main Camera", "rtsp://192.168.144.25:554", "cam1")
-        self.add_fixed_camera_row(True, "Tail Camera", "rtsp://192.168.144.26:554", "cam2")
-        self._update_video_table_height()
+        self.add_fixed_camera_row(True, "Main Camera", "rtsp://192.168.144.25:554/", "cam1")
+        self.add_fixed_camera_row(True, "Tail Camera", "rtsp://192.168.144.26:554/", "cam2")
         self._update_video_base_hint()
 
     def _build_output_section(self) -> None:
@@ -89,29 +90,10 @@ class VideoPanel(QtWidgets.QWidget):
         sg.setContentsMargins(14, 12, 14, 12)
         sg.setSpacing(8)
 
-        self.tbl = QtWidgets.QTableWidget(0, 4)
-        self.tbl.setHorizontalHeaderLabels(["On", "Camera", "Address", "Path"])
-        self.tbl.verticalHeader().setVisible(False)
-        self.tbl.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-        self.tbl.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
-        self.tbl.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-        self.tbl.setAlternatingRowColors(True)
-        self.tbl.setShowGrid(False)
-        self.tbl.setWordWrap(False)
-        self.tbl.setTextElideMode(QtCore.Qt.ElideRight)
-        self.tbl.verticalHeader().setDefaultSectionSize(40)
-        self.tbl.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-        sg.addWidget(self.tbl, 0)
-
-        hdr = self.tbl.horizontalHeader()
-        hdr.setStretchLastSection(True)
-        hdr.setSectionResizeMode(0, QtWidgets.QHeaderView.Fixed)
-        hdr.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
-        hdr.setSectionResizeMode(2, QtWidgets.QHeaderView.Fixed)
-        hdr.setSectionResizeMode(3, QtWidgets.QHeaderView.Fixed)
-        self.tbl.setColumnWidth(0, 52)
-        self.tbl.setColumnHidden(2, True)
-        self.tbl.setColumnHidden(3, True)
+        self.sources_stack = QtWidgets.QVBoxLayout()
+        self.sources_stack.setContentsMargins(0, 0, 0, 0)
+        self.sources_stack.setSpacing(8)
+        sg.addLayout(self.sources_stack)
 
         manual_box = QtWidgets.QFrame()
         manual_box.setObjectName("compactPanel")
@@ -229,16 +211,10 @@ class VideoPanel(QtWidgets.QWidget):
 
     def get_sources(self) -> List[VideoSource]:
         out: List[VideoSource] = []
-        for r in range(self.tbl.rowCount()):
-            enabled = True
-            w0 = self.tbl.cellWidget(r, 0)
-            if w0:
-                cbx = w0.findChild(QtWidgets.QCheckBox)
-                if cbx:
-                    enabled = cbx.isChecked()
-
-            addr = self.tbl.item(r, 2).text().strip() if self.tbl.item(r, 2) else ""
-            path = self.tbl.item(r, 3).text().strip().lstrip("/") if self.tbl.item(r, 3) else ""
+        for row in self._source_rows:
+            enabled = row["checkbox"].isChecked()
+            addr = row["address"]
+            path = row["path"].lstrip("/")
             if addr and path:
                 out.append(
                     VideoSource(
@@ -262,24 +238,57 @@ class VideoPanel(QtWidgets.QWidget):
     def add_fixed_camera_row(
         self, enabled: bool, display_name: str, address: str, out_path: str
     ) -> None:
-        r = self.tbl.rowCount()
-        self.tbl.insertRow(r)
+        card = QtWidgets.QFrame()
+        card.setObjectName("sourceCard")
+        card.setAttribute(QtCore.Qt.WA_StyledBackground, True)
+        card.setMinimumHeight(56)
+        card.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
 
         chk = QtWidgets.QCheckBox()
         chk.setObjectName("videoSourceToggle")
         chk.setChecked(bool(enabled))
-        w = QtWidgets.QWidget()
-        layout = QtWidgets.QHBoxLayout(w)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setAlignment(QtCore.Qt.AlignCenter)
+        chk.setToolTip("Enable this feed")
+
+        name = QtWidgets.QLabel(display_name)
+        name.setObjectName("sourceName")
+
+        addr = QtWidgets.QLabel(address)
+        addr.setObjectName("sourceAddress")
+        addr.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+
+        path = QtWidgets.QLabel(f"/{out_path.lstrip('/')}")
+        path.setObjectName("sourcePath")
+        path.setAlignment(QtCore.Qt.AlignCenter)
+
+        text = QtWidgets.QVBoxLayout()
+        text.setContentsMargins(0, 0, 0, 0)
+        text.setSpacing(3)
+        text.addWidget(name)
+        text.addWidget(addr)
+
+        layout = QtWidgets.QHBoxLayout(card)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(12)
         layout.addWidget(chk)
-        self.tbl.setCellWidget(r, 0, w)
+        layout.addLayout(text, 1)
+        layout.addWidget(path)
 
-        self.tbl.setItem(r, 1, QtWidgets.QTableWidgetItem(display_name))
-        self.tbl.setItem(r, 2, QtWidgets.QTableWidgetItem(address))
-        self.tbl.setItem(r, 3, QtWidgets.QTableWidgetItem(out_path))
+        row = {
+            "card": card,
+            "checkbox": chk,
+            "address": address,
+            "path": out_path,
+        }
+        self._source_rows.append(row)
+        self.sources_stack.addWidget(card)
 
-        self._update_video_table_height()
+        def sync_card_state(_checked: bool = False) -> None:
+            card.setProperty("active", "true" if chk.isChecked() else "false")
+            refresh_style(card)
+            self.settings_changed.emit()
+
+        chk.toggled.connect(sync_card_state)
+        sync_card_state(bool(enabled))
 
     def _toggle_video_settings(self) -> None:
         on = self.btn_toggle_vsettings.isChecked()
@@ -291,19 +300,3 @@ class VideoPanel(QtWidgets.QWidget):
 
     def _update_video_base_hint(self) -> None:
         self.lbl_out_hint.setText(f"RTSP Base: {self.video_base_url()}")
-
-    def _update_video_table_height(self) -> None:
-        header_h = self.tbl.horizontalHeader().height()
-        row_h_total = sum(self.tbl.rowHeight(r) for r in range(self.tbl.rowCount()))
-
-        frame = self.tbl.frameWidth() * 2
-        extra = 6
-
-        desired = header_h + row_h_total + frame + extra
-        min_h = header_h + 3 * self.tbl.verticalHeader().defaultSectionSize() + frame + extra
-        max_h = header_h + 8 * self.tbl.verticalHeader().defaultSectionSize() + frame + extra
-
-        desired = max(min_h, min(desired, max_h))
-
-        self.tbl.setMinimumHeight(min(desired, min_h))
-        self.tbl.setMaximumHeight(desired)

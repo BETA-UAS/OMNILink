@@ -1,101 +1,105 @@
 ACTION_STYLES = """
     QPushButton,
     QToolButton {
-        color: #172336;
-        background: #ffffff;
-        border: 1px solid #c3cedb;
-        border-radius: 7px;
-        padding: 7px 13px;
+        color: #f2f2ef;
+        background: rgba(10, 14, 15, 190);
+        border: 1px solid rgba(98, 122, 122, 105);
+        border-radius: 6px;
+        padding: 7px 12px;
         font-weight: 800;
-        min-height: 29px;
+        min-height: 28px;
     }
 
     QPushButton:hover,
     QToolButton:hover {
-        color: #0f2240;
-        background: #f1f6fb;
-        border-color: #8fa2b8;
+        color: #ffffff;
+        background: #1a1f1f;
+        border-color: #d7dbdb;
     }
 
     QPushButton:pressed,
     QToolButton:pressed {
-        background: #e2ebf5;
-        border-color: #70869f;
+        color: #070909;
+        background: #ffffff;
+        border-color: #ffffff;
         padding-top: 8px;
         padding-bottom: 6px;
     }
 
     QPushButton:focus,
     QToolButton:focus {
-        border: 1px solid #2563eb;
+        border: 1px solid #ffffff;
     }
 
     QPushButton:disabled,
     QToolButton:disabled {
-        color: #9ba7b4;
-        background: #edf2f7;
-        border-color: #d8e2ec;
+        color: #6f7777;
+        background: #151919;
+        border-color: #2a3030;
     }
 
     QPushButton[role="primary"] {
-        color: #ffffff;
-        background: #176b4c;
-        border-color: #11583e;
+        color: #070909;
+        background: #f2f2ef;
+        border-color: #f2f2ef;
     }
 
     QPushButton[role="primary"]:hover {
-        background: #1d7d59;
-        border-color: #146044;
+        color: #070909;
+        background: #ffffff;
+        border-color: #ffffff;
     }
 
     QPushButton[role="primary"]:pressed {
-        background: #11583e;
-        border-color: #0d4632;
+        color: #ffffff;
+        background: #343a3a;
+        border-color: #f2f2ef;
     }
 
     QPushButton[role="danger"] {
         color: #ffffff;
-        background: #bd2d22;
-        border-color: #9f241b;
+        background: #8f241f;
+        border-color: #c24038;
     }
 
     QPushButton[role="danger"]:hover {
-        background: #d23a2e;
-        border-color: #ae2a20;
+        background: #b52d27;
+        border-color: #e2564d;
     }
 
     QPushButton[role="danger"]:pressed {
-        background: #9f241b;
-        border-color: #842018;
+        background: #7f1d19;
+        border-color: #c24038;
     }
 
     QPushButton[role="primary"]:disabled,
     QPushButton[role="danger"]:disabled {
-        color: #9ba7b4;
-        background: #edf2f7;
-        border-color: #d8e2ec;
+        color: #6f7777;
+        background: #151919;
+        border-color: #2a3030;
     }
 
     QPushButton[role="secondary"],
     QToolButton[role="secondary"] {
-        color: #1d334c;
-        background: #f9fbfd;
+        color: #f2f2ef;
+        background: rgba(13, 16, 16, 215);
     }
 
     QPushButton[role="secondary"]:hover,
     QToolButton[role="secondary"]:hover {
-        background: #edf5fc;
-        border-color: #8faac4;
+        background: #1a1f1f;
+        border-color: #d7dbdb;
     }
 
     QToolButton[role="toggle"]:checked {
-        color: #17426b;
-        background: #dcecff;
-        border-color: #79a9d8;
+        color: #070909;
+        background: #f2f2ef;
+        border-color: #f2f2ef;
     }
 
     QToolButton[role="toggle"]:checked:hover {
-        background: #d2e6fc;
-        border-color: #5f93c6;
+        color: #070909;
+        background: #ffffff;
+        border-color: #ffffff;
     }
 """

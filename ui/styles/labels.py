@@ -4,27 +4,64 @@ LABEL_STYLES = """
     }
 
     QLabel#appTitle {
-        color: #0f1f33;
-        font-size: 23px;
+        color: #ffffff;
+        font-size: 22px;
         font-weight: 900;
     }
 
-    QLabel#appSubtitle,
+    QLabel#appLogo {
+        background: transparent;
+    }
+
+    QLabel#appSubtitle {
+        color: #9ca3a3;
+        font-size: 11px;
+        font-weight: 900;
+    }
+
     QLabel#mutedInfo {
-        color: #627286;
+        color: #9ca3a3;
         font-weight: 700;
     }
 
     QLabel#fieldValue {
-        color: #0f1f33;
+        color: #ffffff;
         font-size: 14px;
         font-weight: 900;
     }
 
     QLabel#deviceName {
-        color: #1b2836;
+        color: #f2f2ef;
         font-size: 12px;
         font-weight: 900;
+    }
+
+    QLabel#sectionKicker {
+        color: #858d8d;
+        font-size: 11px;
+        font-weight: 900;
+    }
+
+    QLabel#sourceName {
+        color: #ffffff;
+        font-size: 14px;
+        font-weight: 900;
+    }
+
+    QLabel#sourcePath {
+        color: #070909;
+        background: #f2f2ef;
+        border: 1px solid #f2f2ef;
+        border-radius: 4px;
+        padding: 3px 8px;
+        font-size: 11px;
+        font-weight: 900;
+    }
+
+    QLabel#sourceAddress {
+        color: #9ca3a3;
+        font-size: 12px;
+        font-weight: 700;
     }
 
     QLabel#statusPill {
@@ -36,15 +73,17 @@ LABEL_STYLES = """
     }
 
     QLabel#statusPill[state="ok"] {
-        color: #075c39;
-        background: #ddf7e8;
-        border: 1px solid #78c59a;
+        color: #baf7d7;
+        background: #112019;
+        border: 1px solid #2e7d66;
+        border-radius: 9px;
     }
 
     QLabel#statusPill[state="error"] {
-        color: #9a251c;
-        background: #ffe5e2;
-        border: 1px solid #e3a09b;
+        color: #ffd0cb;
+        background: #241311;
+        border: 1px solid #7e3b35;
+        border-radius: 9px;
     }
 
     QLabel#statusDot {
@@ -53,10 +92,10 @@ LABEL_STYLES = """
     }
 
     QLabel#statusDot[state="ok"] {
-        color: #16834f;
+        color: #48d79a;
     }
 
     QLabel#statusDot[state="error"] {
-        color: #c0362c;
+        color: #e5483f;
     }
 """

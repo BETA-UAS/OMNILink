@@ -1,13 +1,13 @@
 TABLE_STYLES = """
     QTableWidget {
-        color: #1b2836;
-        background: #ffffff;
-        alternate-background-color: #f7fafc;
-        border: 1px solid #d7e0ea;
-        border-radius: 8px;
+        color: #f2f2ef;
+        background: #0d1010;
+        alternate-background-color: #111515;
+        border: 1px solid #303636;
+        border-radius: 0px;
         gridline-color: transparent;
-        selection-background-color: #d9e9fb;
-        selection-color: #142033;
+        selection-background-color: #ffffff;
+        selection-color: #070909;
     }
 
     QTableWidget::item {
@@ -16,10 +16,10 @@ TABLE_STYLES = """
     }
 
     QHeaderView::section {
-        color: #405166;
-        background: #edf3f9;
+        color: #d7dbdb;
+        background: #171b1b;
         border: none;
-        border-bottom: 1px solid #d7e0ea;
+        border-bottom: 1px solid #303636;
         padding: 8px;
         font-size: 12px;
         font-weight: 900;

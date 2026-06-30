@@ -139,7 +139,7 @@ def get_ipv4_address_output() -> str:
 
 
 def select_preferred_ethernet_ipv4() -> str:
-    """Selects an IP from an ethernet interface in the 192.168.144.x subnet."""
+    """Select a useful non-loopback IPv4 address for advertising local services."""
     ip_addr_output = get_ipv4_address_output()
     if not ip_addr_output:
         return "127.0.0.1"
@@ -147,6 +147,8 @@ def select_preferred_ethernet_ipv4() -> str:
     current_if = ""
     candidates_144: List[Tuple[str, str]] = []
     candidates_eth: List[Tuple[str, str]] = []
+    candidates_wifi: List[Tuple[str, str]] = []
+    candidates_other: List[Tuple[str, str]] = []
 
     for line in ip_addr_output.splitlines():
         if re.match(r"^\d+:\s", line):
@@ -165,17 +167,26 @@ def select_preferred_ethernet_ipv4() -> str:
         low_if = current_if.lower()
         is_wifi = any(w in low_if for w in ("wl", "wifi", "wlan", "wireless"))
         is_eth_like = any(e in low_if for e in ("en", "eth", "ether"))
-
-        if is_wifi:
-            continue
+        is_virtual = any(
+            v in low_if
+            for v in ("docker", "lxc", "virbr", "br-", "veth", "vmnet", "zt", "tailscale")
+        )
 
         if ip.startswith("192.168.144."):
             candidates_144.append((current_if, ip))
         elif is_eth_like:
             candidates_eth.append((current_if, ip))
+        elif is_wifi:
+            candidates_wifi.append((current_if, ip))
+        elif not is_virtual:
+            candidates_other.append((current_if, ip))
 
     if candidates_144:
         return candidates_144[0][1]
     if candidates_eth:
         return candidates_eth[0][1]
+    if candidates_wifi:
+        return candidates_wifi[0][1]
+    if candidates_other:
+        return candidates_other[0][1]
     return "127.0.0.1"

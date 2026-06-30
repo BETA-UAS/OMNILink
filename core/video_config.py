@@ -78,11 +78,6 @@ def build_ffmpeg_args(
     args: List[str] = [
         "-loglevel",
         "error",
-        "-nostats",
-        "-progress",
-        "pipe:1",
-        "-stats_period",
-        str(FFMPEG_PROGRESS_INTERVAL_SEC),
         "-fflags",
         "nobuffer",
         "-flags",
@@ -95,8 +90,6 @@ def build_ffmpeg_args(
         args += [
             "-rtsp_transport",
             "tcp",
-            "-stimeout",
-            str(RTSP_IO_TIMEOUT_US),
             "-i",
             source.input_text.strip(),
         ]

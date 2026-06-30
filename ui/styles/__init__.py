@@ -22,5 +22,5 @@ STYLESHEET = "\n".join(part.strip() for part in STYLE_PARTS)
 
 def apply_styles(app: QtWidgets.QApplication) -> None:
     app.setStyle("Fusion")
-    app.setFont(QtGui.QFont("Segoe UI", 10))
+    app.setFont(QtGui.QFont("Liberation Sans", 10))
     app.setStyleSheet(STYLESHEET)

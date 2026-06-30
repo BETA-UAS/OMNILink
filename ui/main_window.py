@@ -84,14 +84,14 @@ class MainWindow(QtWidgets.QMainWindow):
         split = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         split.setChildrenCollapsible(False)
         split.setOpaqueResize(True)
-        split.setHandleWidth(12)
+        split.setHandleWidth(10)
         root_layout.addWidget(split, 1)
 
         left_widget = QtWidgets.QWidget()
         left_widget.setMinimumWidth(420)
         left_layout = QtWidgets.QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 4, 0)
-        left_layout.setSpacing(10)
+        left_layout.setSpacing(8)
         self.video_panel = VideoPanel(self.config, self._out_ip)
         left_layout.addWidget(self.video_panel)
         split.addWidget(self._scrollable_panel(left_widget))
@@ -100,7 +100,7 @@ class MainWindow(QtWidgets.QMainWindow):
         right_widget.setMinimumWidth(420)
         right_layout = QtWidgets.QVBoxLayout(right_widget)
         right_layout.setContentsMargins(4, 0, 0, 0)
-        right_layout.setSpacing(10)
+        right_layout.setSpacing(8)
         self.telemetry_panel = TelemetryPanel(self.config)
         self.router_control_panel = RouterControlPanel()
         self.network_status_panel = NetworkStatusPanel(self.config.get("ping_devices", []))
@@ -110,7 +110,7 @@ class MainWindow(QtWidgets.QMainWindow):
         right_layout.addStretch(1)
         split.addWidget(self._scrollable_panel(right_widget))
 
-        split.setSizes([780, 820])
+        split.setSizes([800, 800])
 
     def _scrollable_panel(self, widget: QtWidgets.QWidget) -> QtWidgets.QScrollArea:
         scroll = QtWidgets.QScrollArea()

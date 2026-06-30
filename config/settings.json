@@ -32,7 +32,6 @@
   "ping_devices": [
     {"name": "Instructor", "ip": "192.168.144.120"},
     {"name": "Student", "ip": "192.168.144.125"},
-    {"name": "Instrument-1", "ip": "192.168.144.200"},
     {"name": "GDT", "ip": "192.168.144.12"},
     {"name": "ADT", "ip": "192.168.144.11"},
     {"name": "Main-Cam", "ip": "192.168.144.25"},

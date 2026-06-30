@@ -6,13 +6,13 @@ SCROLLBAR_STYLES = """
     }
 
     QScrollBar::handle:vertical {
-        background: #b7c4d2;
-        border-radius: 5px;
+        background: #3a4242;
+        border-radius: 4px;
         min-height: 24px;
     }
 
     QScrollBar::handle:vertical:hover {
-        background: #94a5b8;
+        background: #d7dbdb;
     }
 
     QScrollBar::add-line:vertical,

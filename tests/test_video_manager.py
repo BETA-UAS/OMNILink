@@ -2,13 +2,12 @@ from pathlib import Path
 
 from core.config_models import VideoConfig, VideoSource
 from core.video_config import (
-    RTSP_IO_TIMEOUT_US,
     VIDEO_TYPE_RTSP,
     VIDEO_TYPE_WEBCAM,
     build_ffmpeg_args,
     validate_video_config,
 )
-from core.video_manager import StreamRuntime, VideoManager
+from core.video_manager import VideoManager
 from PyQt5 import QtCore
 
 
@@ -18,27 +17,6 @@ class FakeProcess:
 
     def state(self):
         return self._state
-
-
-class FakeSignal:
-    def __init__(self):
-        self.disconnected = False
-
-    def disconnect(self):
-        self.disconnected = True
-
-
-class FakeTimer:
-    def __init__(self):
-        self.timeout = FakeSignal()
-        self.stopped = False
-        self.deleted = False
-
-    def stop(self):
-        self.stopped = True
-
-    def deleteLater(self):
-        self.deleted = True
 
 
 def ensure_qt_app():
@@ -131,7 +109,7 @@ def test_validate_video_config_rejects_invalid_options():
     )
 
 
-def test_build_ffmpeg_args_adds_rtsp_timeout_and_progress_heartbeat():
+def test_build_ffmpeg_args_matches_working_rtsp_pipeline():
     args = build_ffmpeg_args(
         source=video_config().sources[0],
         publish_url="rtsp://127.0.0.1:8554/cam1",
@@ -140,104 +118,40 @@ def test_build_ffmpeg_args_adds_rtsp_timeout_and_progress_heartbeat():
         webcam_fps=30,
     )
 
-    assert args[args.index("-progress") + 1] == "pipe:1"
-    assert args[args.index("-stats_period") + 1] == "1"
-    assert args[args.index("-stimeout") + 1] == str(RTSP_IO_TIMEOUT_US)
+    assert "-progress" not in args
+    assert "-stats_period" not in args
+    assert "-stimeout" not in args
+    assert args[args.index("-rtsp_transport") + 1] == "tcp"
+    assert args[-2:] == ["tcp", "rtsp://127.0.0.1:8554/cam1"]
 
 
-def test_progress_line_marks_stream_healthy_and_resets_backoff(monkeypatch):
-    ensure_qt_app()
-    manager = VideoManager()
-    runtime = StreamRuntime(
-        source=video_config().sources[0],
-        restart_count=3,
-        last_started_at=1.0,
-        last_progress_at=1.0,
-    )
-    monkeypatch.setattr("core.video_manager.time.monotonic", lambda: 42.0)
-
-    manager._handle_ffmpeg_progress_line("cam1", runtime, "frame=1")
-
-    assert runtime.last_frame_count == 1
-    assert runtime.last_progress_at == 42.0
-    assert runtime.restart_count == 0
-
-
-def test_watchdog_replaces_only_stalled_running_stream(monkeypatch):
-    ensure_qt_app()
-    manager = VideoManager()
-    monkeypatch.setattr("core.video_manager.time.monotonic", lambda: 100.0)
-    manager.mediamtx_process = FakeProcess(QtCore.QProcess.Running)
-    manager._ffmpeg_stall_timeout_sec = 5.0
-    manager.streams = {
-        "cam1": StreamRuntime(
-            source=VideoSource(True, VIDEO_TYPE_RTSP, "rtsp://192.168.144.25:554", "cam1"),
-            process=FakeProcess(QtCore.QProcess.Running),
-            last_started_at=80.0,
-            last_progress_at=80.0,
-            last_frame_count=10,
-        ),
-        "cam2": StreamRuntime(
-            source=VideoSource(True, VIDEO_TYPE_RTSP, "rtsp://192.168.144.26:554", "cam2"),
-            process=FakeProcess(QtCore.QProcess.Running),
-            last_started_at=80.0,
-            last_progress_at=99.0,
-            last_frame_count=10,
-        ),
-    }
-    replaced = []
-    monkeypatch.setattr(
-        manager,
-        "_replace_unhealthy_ffmpeg_stream",
-        lambda key, reason: replaced.append((key, reason)),
-    )
-
-    manager._watch()
-
-    assert replaced == [("cam1", "progress timeout")]
-
-
-def test_watchdog_schedules_dead_stream_without_stopping_manager(monkeypatch):
+def test_watchdog_stops_manager_when_any_ffmpeg_process_exits(monkeypatch):
     ensure_qt_app()
     manager = VideoManager()
     manager.mediamtx_process = FakeProcess(QtCore.QProcess.Running)
-    manager.streams = {
-        "cam1": StreamRuntime(
-            source=VideoSource(True, VIDEO_TYPE_RTSP, "rtsp://192.168.144.25:554", "cam1"),
-            process=FakeProcess(QtCore.QProcess.NotRunning),
-        ),
-        "cam2": StreamRuntime(
-            source=VideoSource(True, VIDEO_TYPE_RTSP, "rtsp://192.168.144.26:554", "cam2"),
-            process=FakeProcess(QtCore.QProcess.Running),
-        ),
-    }
-    scheduled = []
-    monkeypatch.setattr(manager, "_schedule_ffmpeg_restart", lambda key: scheduled.append(key))
-    monkeypatch.setattr(
-        manager,
-        "stop",
-        lambda: (_ for _ in ()).throw(AssertionError("VideoManager.stop should not run")),
-    )
+    manager.ffmpeg_processes = [
+        FakeProcess(QtCore.QProcess.Running),
+        FakeProcess(QtCore.QProcess.NotRunning),
+    ]
+    stopped = []
+    monkeypatch.setattr(manager, "stop", lambda: stopped.append(True))
 
     manager._watch()
 
-    assert scheduled == ["cam1"]
+    assert stopped == [True]
 
 
-def test_clear_streams_deletes_restart_timers():
+def test_write_mediamtx_cfg_uses_simple_publisher_paths(tmp_path, monkeypatch):
     ensure_qt_app()
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     manager = VideoManager()
-    timer = FakeTimer()
-    runtime = StreamRuntime(
-        source=VideoSource(True, VIDEO_TYPE_RTSP, "rtsp://192.168.144.25:554", "cam1"),
-        restart_timer=timer,
+
+    path = manager._write_mediamtx_cfg(["cam1", "cam2"])
+
+    assert path.read_text(encoding="utf-8") == (
+        "paths:\n"
+        "  cam1:\n"
+        "    source: publisher\n"
+        "  cam2:\n"
+        "    source: publisher\n"
     )
-    manager.streams = {"cam1": runtime}
-
-    manager._clear_streams()
-
-    assert timer.stopped
-    assert timer.timeout.disconnected
-    assert timer.deleted
-    assert runtime.restart_timer is None
-    assert manager.streams == {}

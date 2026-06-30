@@ -3,6 +3,7 @@ from core.network_utils import (
     is_valid_ipv4_address,
     is_valid_network_port,
     noninteractive_sudo_error,
+    select_preferred_ethernet_ipv4,
     socket_status_has_listener,
 )
 
@@ -85,3 +86,35 @@ def test_noninteractive_sudo_accepts_success(monkeypatch):
     monkeypatch.setattr("core.network_utils.subprocess.run", lambda *_args, **_kwargs: Result())
 
     assert noninteractive_sudo_error() is None
+
+
+def test_select_preferred_ipv4_accepts_144_subnet_on_wifi(monkeypatch):
+    monkeypatch.setattr(
+        "core.network_utils.get_ipv4_address_output",
+        lambda: "\n".join(
+            [
+                "2: wlp2s0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500",
+                "    inet 192.168.144.44/24 brd 192.168.144.255 scope global wlp2s0",
+                "3: enp3s0: <BROADCAST,MULTICAST,UP> mtu 1500",
+                "    inet 10.10.10.2/24 brd 10.10.10.255 scope global enp3s0",
+            ]
+        ),
+    )
+
+    assert select_preferred_ethernet_ipv4() == "192.168.144.44"
+
+
+def test_select_preferred_ipv4_falls_back_to_wifi_before_loopback(monkeypatch):
+    monkeypatch.setattr(
+        "core.network_utils.get_ipv4_address_output",
+        lambda: "\n".join(
+            [
+                "2: wlp2s0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500",
+                "    inet 172.20.10.3/28 brd 172.20.10.15 scope global wlp2s0",
+                "3: docker0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500",
+                "    inet 172.17.0.1/16 brd 172.17.255.255 scope global docker0",
+            ]
+        ),
+    )
+
+    assert select_preferred_ethernet_ipv4() == "172.20.10.3"
