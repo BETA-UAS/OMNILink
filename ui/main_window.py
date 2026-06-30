@@ -1,10 +1,11 @@
 import logging
 from typing import Dict, List
 
+from PyQt5 import QtCore, QtGui, QtWidgets
+
 from core.network_utils import host_responds_to_ping, select_preferred_ethernet_ipv4
 from core.router_manager import RouterManager
 from core.video_manager import VideoManager
-from PyQt5 import QtCore, QtGui, QtWidgets
 from ui.components.network_status_panel import NetworkStatusPanel
 from ui.components.router_control_panel import RouterControlPanel
 from ui.components.telemetry_panel import TelemetryPanel
@@ -13,6 +14,7 @@ from ui.components.video_panel import VideoPanel
 
 DEFAULT_PING_INTERVAL_MS = 300000
 PING_TIMEOUT_SEC = 1
+STATUS_MESSAGE_TIMEOUT_MS = 5000
 
 
 class PingWorker(QtCore.QObject):
@@ -30,13 +32,20 @@ class PingWorker(QtCore.QObject):
     @QtCore.pyqtSlot()
     def run(self) -> None:
         results: Dict[str, bool] = {}
+
         for dev in self.devices:
             if self._cancelled:
                 break
-            results[dev["name"]] = host_responds_to_ping(dev["ip"], timeout_sec=PING_TIMEOUT_SEC)
+
+            results[dev["name"]] = host_responds_to_ping(
+                dev["ip"],
+                timeout_sec=PING_TIMEOUT_SEC,
+            )
+
         if self._cancelled:
             self.finished.emit()
             return
+
         self.result_ready.emit(results)
         self.finished.emit()
 
@@ -44,6 +53,7 @@ class PingWorker(QtCore.QObject):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, config: dict):
         super().__init__()
+
         self.config = config
         self.setWindowTitle("OMNI-Link")
         self.resize(1600, 900)
@@ -51,16 +61,21 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.video = VideoManager(self)
         self.router = RouterManager(self)
+
         self.video.status_changed.connect(self._refresh_status)
         self.router.status_changed.connect(self._refresh_status)
+
         self.video.status_changed.connect(self._sync_ping_state)
         self.router.status_changed.connect(self._sync_ping_state)
+
+        self.video.message.connect(self._handle_video_message)
 
         self._out_ip = select_preferred_ethernet_ipv4()
         self._ping_running = False
         self._ping_thread = None
         self._ping_worker = None
         self._ping_interval_ms = self._configured_ping_interval_ms()
+        self._last_runtime_message = ""
 
         self._build_ui()
         self._setup_connections()
@@ -74,6 +89,7 @@ class MainWindow(QtWidgets.QMainWindow):
         central = QtWidgets.QWidget()
         central.setObjectName("mainSurface")
         self.setCentralWidget(central)
+
         root_layout = QtWidgets.QVBoxLayout(central)
         root_layout.setContentsMargins(14, 14, 14, 10)
         root_layout.setSpacing(10)
@@ -89,27 +105,35 @@ class MainWindow(QtWidgets.QMainWindow):
 
         left_widget = QtWidgets.QWidget()
         left_widget.setMinimumWidth(420)
+
         left_layout = QtWidgets.QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 4, 0)
         left_layout.setSpacing(8)
+
         self.video_panel = VideoPanel(self.config, self._out_ip)
         left_layout.addWidget(self.video_panel)
+
         split.addWidget(self._scrollable_panel(left_widget))
 
         right_widget = QtWidgets.QWidget()
         right_widget.setMinimumWidth(420)
+
         right_layout = QtWidgets.QVBoxLayout(right_widget)
         right_layout.setContentsMargins(4, 0, 0, 0)
         right_layout.setSpacing(8)
+
         self.telemetry_panel = TelemetryPanel(self.config)
         self.router_control_panel = RouterControlPanel()
-        self.network_status_panel = NetworkStatusPanel(self.config.get("ping_devices", []))
+        self.network_status_panel = NetworkStatusPanel(
+            self.config.get("ping_devices", [])
+        )
+
         right_layout.addWidget(self.telemetry_panel)
         right_layout.addWidget(self.router_control_panel)
         right_layout.addWidget(self.network_status_panel)
         right_layout.addStretch(1)
-        split.addWidget(self._scrollable_panel(right_widget))
 
+        split.addWidget(self._scrollable_panel(right_widget))
         split.setSizes([800, 800])
 
     def _scrollable_panel(self, widget: QtWidgets.QWidget) -> QtWidgets.QScrollArea:
@@ -140,6 +164,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ping_timer.timeout.connect(self._request_ping_refresh)
         self.ping_timer.start()
 
+    def _handle_video_message(self, text: str) -> None:
+        text = (text or "").strip()
+        if not text:
+            return
+
+        self._last_runtime_message = text
+        logging.info("Video Manager: %s", text)
+        self.statusBar().showMessage(text, STATUS_MESSAGE_TIMEOUT_MS)
+
     def _refresh_ethernet_ip(self) -> None:
         self._out_ip = select_preferred_ethernet_ipv4()
         self.video_panel.set_output_ip(self._out_ip)
@@ -149,7 +182,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _start_video_clicked(self) -> None:
         self._refresh_ethernet_ip()
+
         options = self.video_panel.get_video_options()
+
         err = self.video.start(
             mediamtx_bin=options["mediamtx_bin"],
             out_port=options["out_port"],
@@ -158,18 +193,25 @@ class MainWindow(QtWidgets.QMainWindow):
             webcam_res=options["webcam_res"],
             webcam_fps=options["webcam_fps"],
         )
+
         if err:
             QtWidgets.QMessageBox.critical(self, "OMNI-Link", err)
-            logging.error(f"Video Manager Error: {err}")
+            logging.error("Video Manager Error: %s", err)
+            self.statusBar().showMessage(err, STATUS_MESSAGE_TIMEOUT_MS)
+
         self._refresh_status()
         self._sync_ping_state()
 
     def _start_router_clicked(self) -> None:
         options = self.telemetry_panel.get_router_options()
+
         err = self.router.start(**options)
+
         if err:
             QtWidgets.QMessageBox.critical(self, "OMNI-Link", err)
-            logging.error(f"Router Manager Error: {err}")
+            logging.error("Router Manager Error: %s", err)
+            self.statusBar().showMessage(err, STATUS_MESSAGE_TIMEOUT_MS)
+
         self._refresh_status()
         self._sync_ping_state()
 
@@ -203,7 +245,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._ping_should_pause():
             return
 
-        self.network_status_panel.apply_results(results, self.config.get("ping_devices", []))
+        self.network_status_panel.apply_results(
+            results,
+            self.config.get("ping_devices", []),
+        )
 
     def _on_ping_finished(self) -> None:
         self._ping_running = False
@@ -232,16 +277,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.router_control_panel.set_running(r_on, self.router.effective_tcp_port())
         self.toolbar.set_any_running(v_on or r_on)
 
-        self.statusBar().showMessage(
-            f"Video: {'ON' if v_on else 'OFF'} | Router: {'ON' if r_on else 'OFF'}"
-        )
+        status_text = f"Video: {'ON' if v_on else 'OFF'} | Router: {'ON' if r_on else 'OFF'}"
+
+        if self._last_runtime_message and (v_on or r_on):
+            status_text = f"{status_text} | {self._last_runtime_message}"
+
+        self.statusBar().showMessage(status_text)
 
     def _configured_ping_interval_ms(self) -> int:
         raw_interval = self.config.get("ping_interval_ms", DEFAULT_PING_INTERVAL_MS)
+
         try:
             interval_ms = int(raw_interval)
         except (TypeError, ValueError):
             interval_ms = DEFAULT_PING_INTERVAL_MS
+
         return max(60000, interval_ms)
 
     def _ping_should_pause(self) -> bool:
@@ -253,12 +303,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if paused:
             if self.ping_timer.isActive():
                 self.ping_timer.stop()
+
             self._cancel_ping_refresh()
             self.network_status_panel.set_paused(True)
             return
 
         self.network_status_panel.set_paused(False)
         self.network_status_panel.set_refreshing(self._ping_running)
+
         if not self.ping_timer.isActive():
             self.ping_timer.start(self._ping_interval_ms)
 
@@ -268,13 +320,19 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def closeEvent(self, e: QtGui.QCloseEvent):
         logging.info("Shutting down OMNI-Link...")
+
         self._stop_all()
+
         if self._ping_thread and self._ping_thread.isRunning():
             if self.ping_timer.isActive():
                 self.ping_timer.stop()
+
             if self._ping_worker:
                 self._ping_worker.cancel()
+
             self._ping_thread.quit()
+
             if not self._ping_thread.wait(3000):
                 logging.warning("Timed out waiting for ping worker to stop.")
+
         e.accept()

@@ -4,8 +4,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${VENV_DIR:-${ROOT_DIR}/.venv}"
 PYTHON_BIN="${PYTHON:-python3}"
+
 INSTALL_MEDIAMTX="${INSTALL_MEDIAMTX:-1}"
 MEDIAMTX_BIN="${MEDIAMTX_BIN:-/usr/local/bin/mediamtx}"
+
+INSTALL_MAVLINK_ROUTER="${INSTALL_MAVLINK_ROUTER:-1}"
 
 log() {
   printf '\n[OMNI-Link setup] %s\n' "$*"
@@ -59,6 +62,7 @@ install_apt_packages() {
     ca-certificates
     curl
     ffmpeg
+    git
     iproute2
     iputils-ping
     python3
@@ -90,16 +94,88 @@ install_apt_packages() {
     libxkbcommon-x11-0
   )
 
+  local mavlink_router_build_packages=(
+    build-essential
+    libsystemd-dev
+    meson
+    ninja-build
+    pkg-config
+  )
+
   log "Installing system packages"
   "${SUDO[@]}" apt-get update
-  "${SUDO[@]}" apt-get install -y "${packages[@]}" "${qt_runtime_packages[@]}"
+  "${SUDO[@]}" apt-get install -y \
+    "${packages[@]}" \
+    "${qt_runtime_packages[@]}" \
+    "${mavlink_router_build_packages[@]}"
+}
 
-  if apt-cache show mavlink-router >/dev/null 2>&1; then
-    "${SUDO[@]}" apt-get install -y mavlink-router
-  elif apt-cache show mavlink-routerd >/dev/null 2>&1; then
-    "${SUDO[@]}" apt-get install -y mavlink-routerd
+install_mavlink_router() {
+  if [[ "${INSTALL_MAVLINK_ROUTER}" != "1" ]]; then
+    log "Skipping mavlink-router install because INSTALL_MAVLINK_ROUTER=${INSTALL_MAVLINK_ROUTER}"
+    return
+  fi
+
+  if need_cmd mavlink-routerd; then
+    log "mavlink-routerd already installed: $(command -v mavlink-routerd)"
+    return
+  fi
+
+  require_sudo
+
+  if need_cmd apt-get; then
+    log "Trying to install mavlink-router from apt"
+
+    if apt-cache show mavlink-router >/dev/null 2>&1; then
+      "${SUDO[@]}" apt-get install -y mavlink-router || true
+    elif apt-cache show mavlink-routerd >/dev/null 2>&1; then
+      "${SUDO[@]}" apt-get install -y mavlink-routerd || true
+    else
+      warn "mavlink-router package was not found in apt repositories. Building from source."
+    fi
+  fi
+
+  if need_cmd mavlink-routerd; then
+    log "mavlink-routerd installed from apt: $(command -v mavlink-routerd)"
+    return
+  fi
+
+  if ! need_cmd git || ! need_cmd meson || ! need_cmd ninja; then
+    warn "Cannot build mavlink-routerd because git/meson/ninja is missing."
+    return
+  fi
+
+  local tmpdir=""
+
+  cleanup_mavlink_router_tmpdir() {
+    if [[ -n "${tmpdir:-}" && -d "${tmpdir}" ]]; then
+      rm -rf "${tmpdir}"
+    fi
+  }
+
+  tmpdir="$(mktemp -d)"
+  trap cleanup_mavlink_router_tmpdir RETURN
+
+  log "Building mavlink-router from source"
+  git clone https://github.com/mavlink-router/mavlink-router.git "${tmpdir}/mavlink-router"
+
+  cd "${tmpdir}/mavlink-router"
+  git submodule update --init --recursive
+
+  meson setup build .
+  ninja -C build
+  "${SUDO[@]}" ninja -C build install
+  "${SUDO[@]}" ldconfig || true
+
+  cd "${ROOT_DIR}"
+
+  cleanup_mavlink_router_tmpdir
+  trap - RETURN
+
+  if need_cmd mavlink-routerd; then
+    log "mavlink-routerd installed successfully: $(command -v mavlink-routerd)"
   else
-    warn "mavlink-router package was not found in apt repositories. Install mavlink-routerd manually before using telemetry routing."
+    warn "mavlink-routerd build completed but binary was not found in PATH."
   fi
 }
 
@@ -129,10 +205,12 @@ import urllib.request
 
 arch = sys.argv[1]
 api_url = "https://api.github.com/repos/bluenviron/mediamtx/releases/latest"
+
 with urllib.request.urlopen(api_url, timeout=30) as response:
     release = json.load(response)
 
 needle = f"linux_{arch}.tar.gz"
+
 for asset in release.get("assets", []):
     url = asset.get("browser_download_url", "")
     if needle in url:
@@ -158,6 +236,7 @@ install_mediamtx() {
 
   local arch
   arch="$(detect_arch)"
+
   if [[ "${arch}" == "unsupported" ]]; then
     warn "Unsupported architecture for automatic MediaMTX install: $(uname -m). Install mediamtx manually."
     return
@@ -174,6 +253,7 @@ install_mediamtx() {
 
   log "Resolving latest MediaMTX release for linux_${arch}"
   url="$(latest_mediamtx_url "${arch}")"
+
   tmpdir="$(mktemp -d)"
   trap cleanup_mediamtx_tmpdir RETURN
 
@@ -189,6 +269,7 @@ install_mediamtx() {
 print_summary() {
   local mediamtx_path
   mediamtx_path="$(command -v mediamtx || true)"
+
   if [[ -z "${mediamtx_path}" && -x "${MEDIAMTX_BIN}" ]]; then
     mediamtx_path="${MEDIAMTX_BIN}"
   fi
@@ -208,11 +289,16 @@ Runtime checks:
   ip:               $(command -v ip || true)
   ping:             $(command -v ping || true)
 
+Optional environment flags:
+  INSTALL_MEDIAMTX=0 ./setup.sh
+  INSTALL_MAVLINK_ROUTER=0 ./setup.sh
+
 EOF
 }
 
 main() {
   install_apt_packages
+  install_mavlink_router
   install_python_packages
   install_mediamtx
   print_summary
