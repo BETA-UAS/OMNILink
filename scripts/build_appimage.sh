@@ -54,6 +54,7 @@ pyinstaller \
   --workpath "${ROOT_DIR}/build/pyinstaller" \
   --specpath "${ROOT_DIR}/build/pyinstaller" \
   --add-data "${ROOT_DIR}/config/settings.json:config" \
+  --add-data "${ROOT_DIR}/ui/assets:ui/assets" \
   "${ROOT_DIR}/main.py"
 
 cp -a "${ROOT_DIR}/dist/${BINARY_NAME}" "${APPDIR}/usr/bin/${BINARY_NAME}"

@@ -65,7 +65,7 @@ INPUT_STYLES = """
     }
 
     QCheckBox::indicator:checked {
-        image: url(ui/assets/checkmark.svg);
+        image: __CHECKMARK_IMAGE__;
         color: #070909;
         background: #f2f2ef;
         border: 1px solid #f2f2ef;
@@ -89,7 +89,7 @@ INPUT_STYLES = """
     }
 
     QRadioButton::indicator:checked {
-        image: url(ui/assets/radio-dot.svg);
+        image: __RADIO_DOT_IMAGE__;
         background: #070909;
         border: 1px solid #f2f2ef;
     }
