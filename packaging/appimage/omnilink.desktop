@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=OMNILink
+Comment=OMNI-Link router and video control panel
+Exec=omnilink
+Icon=omnilink
+Categories=Network;
+Terminal=false

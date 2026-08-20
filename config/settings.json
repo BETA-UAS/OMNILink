@@ -1,0 +1,40 @@
+{
+  "mediamtx_bin_default": "/usr/local/bin/mediamtx",
+  "ping_interval_ms": 300000,
+  "telemetry": {
+    "default_target_port": 14550,
+    "targets": {
+      "Instructor": "192.168.144.120",
+      "Student": "192.168.144.125",
+      "Instrument-1": "192.168.144.200"
+    },
+    "input_presets": {
+      "HM30": {
+        "mode": "UDP",
+        "listen_udp": 19856,
+        "primer_enabled": true,
+        "primer_ip": "192.168.144.12",
+        "primer_port": 19856,
+        "tcp_up_ip": "",
+        "tcp_up_port": 0
+      },
+      "IVCAN": {
+        "mode": "TCP",
+        "listen_udp": 19856,
+        "primer_enabled": false,
+        "primer_ip": "0.0.0.0",
+        "primer_port": 1,
+        "tcp_up_ip": "192.168.144.11",
+        "tcp_up_port": 20001
+      }
+    }
+  },
+  "ping_devices": [
+    {"name": "Instructor", "ip": "192.168.144.120"},
+    {"name": "Student", "ip": "192.168.144.125"},
+    {"name": "GDT", "ip": "192.168.144.12"},
+    {"name": "ADT", "ip": "192.168.144.11"},
+    {"name": "Main-Cam", "ip": "192.168.144.25"},
+    {"name": "Tail-Cam", "ip": "192.168.144.26"}
+  ]
+}
