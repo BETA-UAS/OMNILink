@@ -3,26 +3,15 @@ APP_STYLES = """
         color: #f2f2ef;
         background: transparent;
         font-family: "Liberation Sans", "Inter", "Segoe UI", Arial, sans-serif;
-        font-size: 13px;
+        font-size: 15px;
     }
 
     QMainWindow {
-        background: #000000;
+        background: #0f171c;
     }
 
     QWidget#mainSurface {
-        background: qradialgradient(
-            cx: 0.20,
-            cy: 0.98,
-            radius: 1.05,
-            fx: 0.10,
-            fy: 1.08,
-            stop: 0 rgba(0, 92, 86, 112),
-            stop: 0.24 rgba(0, 58, 68, 84),
-            stop: 0.50 rgba(0, 24, 38, 56),
-            stop: 0.76 rgba(0, 8, 17, 34),
-            stop: 1 rgba(0, 0, 0, 255)
-        );
+        background: #0f171c;
     }
 
     QSplitter::handle {
@@ -38,8 +27,36 @@ APP_STYLES = """
 
     QStatusBar {
         color: #9ca3a3;
-        background: #000000;
+        background: #111c23;
         border-top: 1px solid #2a3030;
         font-weight: 700;
+        min-height: 46px;
+    }
+
+    QTabWidget#mainTabs::pane {
+        background: transparent;
+        border: none;
+        border-top: 1px solid #2a3438;
+        top: -1px;
+    }
+
+    QTabBar::tab {
+        color: #9eafb7;
+        background: transparent;
+        border: none;
+        border-bottom: 3px solid transparent;
+        min-width: 108px;
+        padding: 12px 14px 11px 14px;
+        font-size: 18px;
+        font-weight: 800;
+    }
+
+    QTabBar::tab:selected {
+        color: #ffffff;
+        border-bottom-color: #1bc4c8;
+    }
+
+    QTabBar::tab:hover:!selected {
+        color: #d7e5e8;
     }
 """

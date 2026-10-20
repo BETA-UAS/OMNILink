@@ -34,10 +34,9 @@ def _qss_image_url(path: Path) -> str:
 def build_stylesheet() -> str:
     assets_dir = _app_base_path() / "ui" / "assets"
     stylesheet = "\n".join(part.strip() for part in STYLE_PARTS)
-    return (
-        stylesheet.replace("__CHECKMARK_IMAGE__", _qss_image_url(assets_dir / "checkmark.svg"))
-        .replace("__RADIO_DOT_IMAGE__", _qss_image_url(assets_dir / "radio-dot.svg"))
-    )
+    return stylesheet.replace(
+        "__CHECKMARK_IMAGE__", _qss_image_url(assets_dir / "checkmark.svg")
+    ).replace("__RADIO_DOT_IMAGE__", _qss_image_url(assets_dir / "radio-dot.svg"))
 
 
 def apply_styles(app: QtWidgets.QApplication) -> None:

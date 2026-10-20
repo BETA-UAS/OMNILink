@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from core.config_models import RouterConfig
+from core.diagnostics import SuppressingLogger
 from core.mavlink import mavlink_v1_heartbeat_packet
 from core.network_utils import (
     command_exists,
@@ -54,6 +55,7 @@ class UdpHeartbeatPrimer(QtCore.QThread):
 
 class RouterManager(QtCore.QObject):
     status_changed = QtCore.pyqtSignal()
+    failed = QtCore.pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -62,15 +64,29 @@ class RouterManager(QtCore.QObject):
         self.router_process.setProcessChannelMode(QtCore.QProcess.MergedChannels)
         self.router_process.stateChanged.connect(lambda _state: self.status_changed.emit())
         self.router_process.finished.connect(self._on_router_finished)
+        self.router_process.errorOccurred.connect(self._on_router_error)
         self.router_process.readyReadStandardOutput.connect(self._log_router_output)
 
         self._effective_tcp_port = 5760
         self._primer: Optional[UdpHeartbeatPrimer] = None
         self._router_config_path: Optional[Path] = None
         self._stopping = False
+        self._starting = False
+        self._failure_reported = False
+        self._noisy_log = SuppressingLogger(logging.getLogger("router.subprocess"))
+        self._stop_timer = QtCore.QTimer(self)
+        self._stop_timer.setSingleShot(True)
+        self._stop_timer.timeout.connect(self._force_stop)
 
     def is_running(self) -> bool:
         return self.router_process.state() == QtCore.QProcess.Running
+
+    def is_starting(self) -> bool:
+        return self._starting
+
+    def process_ids(self):
+        pid = int(self.router_process.processId())
+        return [("MAVLink Router", pid)] if pid else []
 
     def effective_tcp_port(self) -> int:
         return int(self._effective_tcp_port)
@@ -128,7 +144,7 @@ class RouterManager(QtCore.QObject):
         espusr_ip: str,
         espusr_port: int,
     ) -> Optional[str]:
-        if self.is_running():
+        if self._starting or self.router_process.state() != QtCore.QProcess.NotRunning:
             return None
 
         if not command_exists(self.router_bin):
@@ -165,39 +181,57 @@ class RouterManager(QtCore.QObject):
             logging.exception("Router config file error")
             return "Gagal membuat konfigurasi router"
 
-        self._run_udp_primer(config)
-
         command = self.router_bin
         args = ["-c", str(config_path)]
         if config.use_sudo:
             command = "sudo"
             args = ["-n", self.router_bin] + args
 
-        logging.info("Starting MAVLink Router: %s %s", command, " ".join(args))
-        self.router_process.start(command, args)
-
-        if not self.router_process.waitForStarted(1500):
-            logging.error("Failed to start mavlink-routerd process.")
-            self._cleanup_router_config()
-            return "Gagal menjalankan mavlink-routerd"
-
+        self._starting = True
+        self._failure_reported = False
+        if not self._run_udp_primer(config, lambda: self._launch_router(command, args)):
+            self._launch_router(command, args)
         self.status_changed.emit()
         return None
 
+    def _launch_router(self, command: str, args: List[str]) -> None:
+        if not self._starting or self._stopping:
+            return
+        logging.info("Starting MAVLink Router: %s %s", command, " ".join(args))
+        self.router_process.start(command, args)
+
     def stop(self) -> None:
         if self.router_process.state() == QtCore.QProcess.NotRunning:
+            self._starting = False
             self._cleanup_router_config()
             self.status_changed.emit()
             return
 
         logging.info("Stopping MAVLink Router")
         self._stopping = True
+        self._starting = False
         self.router_process.terminate()
-        if not self.router_process.waitForFinished(1500):
+        self._stop_timer.start(1500)
+        self.status_changed.emit()
+
+    def emergency_shutdown(self) -> None:
+        self.stop()
+        if self.router_process.state() != QtCore.QProcess.NotRunning:
             self.router_process.kill()
-            self.router_process.waitForFinished(1500)
-        self._stopping = False
+
+    def _force_stop(self) -> None:
+        if self.router_process.state() != QtCore.QProcess.NotRunning:
+            self.router_process.kill()
+
+    def _on_router_error(self, _error: QtCore.QProcess.ProcessError) -> None:
+        if self._stopping:
+            return
+        message = f"Telemetry router process error: {self.router_process.errorString()}"
+        self._starting = False
+        logging.error(message)
         self._cleanup_router_config()
+        self._failure_reported = True
+        self.failed.emit(message)
         self.status_changed.emit()
 
     def _write_temp_config(self, config_text: str) -> Path:
@@ -212,15 +246,15 @@ class RouterManager(QtCore.QObject):
         self._router_config_path = path
         return path
 
-    def _run_udp_primer(self, config: RouterConfig) -> None:
+    def _run_udp_primer(self, config: RouterConfig, callback) -> bool:
         if config.in_mode.strip().upper() != "UDP" or not config.primer_enabled:
-            return
+            return False
         if not (
             is_valid_ipv4_address(config.primer_up_ip)
             and is_valid_network_port(config.primer_up_port)
             and is_valid_network_port(config.listen_udp_port)
         ):
-            return
+            return False
 
         self._primer = UdpHeartbeatPrimer(
             listen_port=config.listen_udp_port,
@@ -228,8 +262,16 @@ class RouterManager(QtCore.QObject):
             upstream_port=config.primer_up_port,
         )
         self._primer.start()
-        self._primer.wait(1200)
-        self._primer = None
+        primer = self._primer
+
+        def finished() -> None:
+            if self._primer is primer:
+                self._primer = None
+            primer.deleteLater()
+            callback()
+
+        primer.finished.connect(finished)
+        return True
 
     def _cleanup_router_config(self) -> None:
         if not self._router_config_path:
@@ -242,26 +284,26 @@ class RouterManager(QtCore.QObject):
         finally:
             self._router_config_path = None
 
-    def _on_router_finished(
-        self, _exit_code: int, _exit_status: QtCore.QProcess.ExitStatus
-    ) -> None:
+    def _on_router_finished(self, exit_code: int, _exit_status: QtCore.QProcess.ExitStatus) -> None:
+        was_stopping = self._stopping
+        self._starting = False
+        self._stop_timer.stop()
+        self._stopping = False
         self._cleanup_router_config()
-        if not self._stopping:
-            logging.info("MAVLink Router process finished.")
+        if not was_stopping and not self._failure_reported:
+            message = f"Telemetry router exited unexpectedly (code {exit_code})"
+            logging.error(message)
+            self.failed.emit(message)
+        self._failure_reported = False
+        self._noisy_log.flush()
         self.status_changed.emit()
 
     def _log_router_output(self) -> None:
         try:
-            output = (
-                bytes(self.router_process.readAllStandardOutput())
-                .decode(
-                    "utf-8",
-                    errors="replace",
-                )
-                .strip()
-            )
+            output = bytes(self.router_process.readAllStandardOutput())
         except RuntimeError:
             return
 
-        if output:
-            logging.debug("MAVLink Router: %s", output)
+        for line in output[:65536].decode("utf-8", errors="replace").splitlines()[:512]:
+            if line.strip():
+                self._noisy_log.record(f"MAVLink Router: {line.strip()[:500]}")

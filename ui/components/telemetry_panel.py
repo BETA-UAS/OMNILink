@@ -1,221 +1,212 @@
 from PyQt5 import QtCore, QtWidgets
-from ui.components.common import set_button_role
+
+from ui.components.common import refresh_style, set_muted_label
 
 
-class TelemetryPanel(QtWidgets.QGroupBox):
-    targets_copy_requested = QtCore.pyqtSignal(str)
+class TelemetryPanel(QtWidgets.QFrame):
+    """Shared telemetry settings model and Settings-tab editor."""
+
     settings_changed = QtCore.pyqtSignal()
 
     def __init__(self, config: dict, parent=None):
-        super().__init__("Telemetry Router", parent)
+        super().__init__(parent)
+        self.setObjectName("settingsCard")
+        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Maximum)
         self.config = config
-        self._targets_generated = ""
+        self._profile = "IVCAN"
+        self._targets_enabled = {"Instructor": True, "Student": True}
 
-        layout = QtWidgets.QGridLayout(self)
-        layout.setContentsMargins(14, 12, 14, 14)
-        layout.setHorizontalSpacing(12)
-        layout.setVerticalSpacing(10)
+        root = QtWidgets.QVBoxLayout(self)
+        root.setContentsMargins(22, 20, 22, 22)
+        root.setSpacing(14)
 
-        self._build_presets(layout)
-        self._build_targets(layout)
-        self._build_instrument_light(layout)
-        self._build_manual_advanced(layout)
-        self._setup_connections()
+        title = QtWidgets.QLabel("Connection settings")
+        title.setObjectName("settingsTitle")
+        subtitle = QtWidgets.QLabel("Telemetry input, router, and optional outputs")
+        set_muted_label(subtitle)
+        root.addWidget(title)
+        root.addWidget(subtitle)
 
-        self._sync_espusr_ui()
-        self._sync_targets_from_checkboxes()
-        self._apply_tel_profile_ui()
+        connection = QtWidgets.QFrame()
+        connection.setObjectName("settingsSection")
+        grid = QtWidgets.QGridLayout(connection)
+        grid.setContentsMargins(16, 14, 16, 16)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(10)
+        self.lbl_profile = QtWidgets.QLabel()
+        self.lbl_endpoint = QtWidgets.QLabel()
+        self.sp_listen_udp = QtWidgets.QSpinBox()
+        self.sp_listen_udp.setRange(1, 65535)
+        self.ed_tcp_ip = QtWidgets.QLineEdit()
+        self.sp_tcp_port = QtWidgets.QSpinBox()
+        self.sp_tcp_port.setRange(1, 65535)
+        self.sp_tcp_server = QtWidgets.QSpinBox()
+        self.sp_tcp_server.setRange(0, 65535)
+        self.sp_tcp_server.setValue(5760)
+        self.cb_primer = QtWidgets.QCheckBox("Enable UDP primer")
+        self.ed_primer_ip = QtWidgets.QLineEdit()
+        self.sp_primer_port = QtWidgets.QSpinBox()
+        self.sp_primer_port.setRange(1, 65535)
+        self.cb_sudo = QtWidgets.QCheckBox("Administrator")
 
-    def _build_presets(self, layout: QtWidgets.QGridLayout) -> None:
-        self.rb_hm30 = QtWidgets.QRadioButton("Demonstrator")
-        self.rb_ivcan = QtWidgets.QRadioButton("Omni Trainer")
-        self.rb_manual = QtWidgets.QRadioButton("Manual")
-        self.rb_ivcan.setChecked(True)
-        self.rb_hm30.setVisible(True)
-        self.rb_manual.setVisible(False)
+        section_title = QtWidgets.QLabel("Router connection")
+        section_title.setObjectName("sectionTitle")
+        grid.addWidget(section_title, 0, 0, 1, 4)
+        grid.addWidget(QtWidgets.QLabel("Selected profile"), 1, 0)
+        grid.addWidget(self.lbl_profile, 1, 1, 1, 3)
+        grid.addWidget(QtWidgets.QLabel("Effective input"), 2, 0)
+        grid.addWidget(self.lbl_endpoint, 2, 1, 1, 3)
+        grid.addWidget(QtWidgets.QLabel("UDP listen port"), 3, 0)
+        grid.addWidget(self.sp_listen_udp, 3, 1)
+        grid.addWidget(QtWidgets.QLabel("TCP upstream IP"), 4, 0)
+        grid.addWidget(self.ed_tcp_ip, 4, 1, 1, 3)
+        grid.addWidget(QtWidgets.QLabel("TCP upstream port"), 5, 0)
+        grid.addWidget(self.sp_tcp_port, 5, 1)
+        grid.addWidget(QtWidgets.QLabel("Local TCP server port"), 6, 0)
+        grid.addWidget(self.sp_tcp_server, 6, 1)
+        grid.addWidget(self.cb_primer, 7, 0, 1, 2)
+        grid.addWidget(self.cb_sudo, 7, 2, 1, 2)
+        grid.addWidget(QtWidgets.QLabel("Primer IP"), 8, 0)
+        grid.addWidget(self.ed_primer_ip, 8, 1, 1, 3)
+        grid.addWidget(QtWidgets.QLabel("Primer port"), 9, 0)
+        grid.addWidget(self.sp_primer_port, 9, 1)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(3, 1)
+        root.addWidget(connection)
 
-        preset_box = QtWidgets.QGroupBox("Input Preset")
-        preset_box.setObjectName("innerPanel")
-        pv = QtWidgets.QHBoxLayout(preset_box)
-        pv.setContentsMargins(12, 10, 12, 10)
-        pv.setSpacing(12)
-        pv.addWidget(self.rb_hm30)
-        pv.addWidget(self.rb_ivcan)
-        pv.addWidget(self.rb_manual)
-        pv.addStretch(1)
-        layout.addWidget(preset_box, 0, 0, 1, 4)
-
-    def _build_targets(self, layout: QtWidgets.QGridLayout) -> None:
-        targets_box = QtWidgets.QGroupBox("Targets / Client")
-        targets_box.setObjectName("innerPanel")
-        tv = QtWidgets.QGridLayout(targets_box)
-        tv.setContentsMargins(12, 10, 12, 10)
-        tv.setHorizontalSpacing(12)
-        tv.setVerticalSpacing(8)
-
-        targets_cfg = self.config.get("telemetry", {}).get("targets", {})
-
-        self.cb_t_pc1 = QtWidgets.QCheckBox(f"Instructor ({targets_cfg.get('Instructor', 'N/A')})")
-        self.cb_t_pc2 = QtWidgets.QCheckBox(f"Student ({targets_cfg.get('Student', 'N/A')})")
-        self.cb_t_pc1.setChecked(True)
-        self.cb_t_pc2.setChecked(True)
-
-        self.sp_target_port = QtWidgets.QSpinBox()
-        self.sp_target_port.setRange(1, 65535)
-        self.sp_target_port.setValue(
-            self.config.get("telemetry", {}).get("default_target_port", 14550)
-        )
-
-        self.btn_copy_targets = QtWidgets.QPushButton("Copy Targets")
-        set_button_role(self.btn_copy_targets, "secondary")
-
-        tv.addWidget(self.cb_t_pc1, 0, 0, 1, 2)
-        tv.addWidget(self.cb_t_pc2, 0, 2, 1, 2)
-        tv.addWidget(QtWidgets.QLabel("Port"), 1, 0)
-        tv.addWidget(self.sp_target_port, 1, 1)
-        tv.addWidget(self.btn_copy_targets, 1, 2, 1, 2)
-        tv.setColumnStretch(3, 1)
-        layout.addWidget(targets_box, 1, 0, 1, 4)
-
-    def _build_instrument_light(self, layout: QtWidgets.QGridLayout) -> None:
-        tap_box = QtWidgets.QGroupBox("Instrument Light")
-        tap_box.setObjectName("innerPanel")
-        tapg = QtWidgets.QGridLayout(tap_box)
-        tapg.setContentsMargins(12, 10, 12, 10)
-        tapg.setHorizontalSpacing(12)
-        tapg.setVerticalSpacing(8)
-
-        self.cb_espusr_enable = QtWidgets.QCheckBox("Enable")
-        self.cb_espusr_enable.setChecked(False)
-
+        instrument = QtWidgets.QFrame()
+        instrument.setObjectName("settingsSection")
+        instrument_grid = QtWidgets.QGridLayout(instrument)
+        instrument_grid.setContentsMargins(16, 14, 16, 16)
+        instrument_title = QtWidgets.QLabel("Instrument Light")
+        instrument_title.setObjectName("sectionTitle")
+        self.cb_espusr_enable = QtWidgets.QCheckBox("Enable Instrument Light output")
         self.cb_espusr_mode = QtWidgets.QComboBox()
         self.cb_espusr_mode.addItems(["TCP", "UDP"])
-        self.cb_espusr_mode.setCurrentText("TCP")
-
         self.ed_espusr_ip = QtWidgets.QLineEdit("192.168.144.200")
         self.sp_espusr_port = QtWidgets.QSpinBox()
         self.sp_espusr_port.setRange(1, 65535)
         self.sp_espusr_port.setValue(14600)
+        instrument_grid.addWidget(instrument_title, 0, 0, 1, 4)
+        instrument_grid.addWidget(self.cb_espusr_enable, 1, 0, 1, 4)
+        self.instrument_detail_labels = [
+            QtWidgets.QLabel("Mode"),
+            QtWidgets.QLabel("IP"),
+            QtWidgets.QLabel("Port"),
+        ]
+        instrument_grid.addWidget(self.instrument_detail_labels[0], 2, 0)
+        instrument_grid.addWidget(self.cb_espusr_mode, 2, 1)
+        instrument_grid.addWidget(self.instrument_detail_labels[1], 3, 0)
+        instrument_grid.addWidget(self.ed_espusr_ip, 3, 1, 1, 3)
+        instrument_grid.addWidget(self.instrument_detail_labels[2], 4, 0)
+        instrument_grid.addWidget(self.sp_espusr_port, 4, 1)
+        instrument_grid.setColumnStretch(1, 1)
+        root.addWidget(instrument)
 
-        tapg.addWidget(self.cb_espusr_enable, 0, 0, 1, 4)
-        tapg.addWidget(QtWidgets.QLabel("Mode"), 1, 0)
-        tapg.addWidget(self.cb_espusr_mode, 1, 1)
-        tapg.addWidget(QtWidgets.QLabel("Port"), 1, 2)
-        tapg.addWidget(self.sp_espusr_port, 1, 3)
-        tapg.addWidget(QtWidgets.QLabel("IP"), 2, 0)
-        tapg.addWidget(self.ed_espusr_ip, 2, 1, 1, 3)
-        tapg.setColumnStretch(1, 1)
-        layout.addWidget(tap_box, 2, 0, 1, 4)
+        for widget in (
+            self.sp_listen_udp,
+            self.ed_tcp_ip,
+            self.sp_tcp_port,
+            self.sp_tcp_server,
+            self.cb_primer,
+            self.ed_primer_ip,
+            self.sp_primer_port,
+            self.cb_sudo,
+            self.cb_espusr_enable,
+            self.cb_espusr_mode,
+            self.ed_espusr_ip,
+            self.sp_espusr_port,
+        ):
+            if hasattr(widget, "valueChanged"):
+                widget.valueChanged.connect(self.settings_changed)
+            if hasattr(widget, "textChanged"):
+                widget.textChanged.connect(self.settings_changed)
+            if hasattr(widget, "toggled"):
+                widget.toggled.connect(self.settings_changed)
+            if hasattr(widget, "currentTextChanged"):
+                widget.currentTextChanged.connect(self.settings_changed)
+        self.cb_espusr_enable.toggled.connect(self._sync_instrument_enabled)
+        self.set_profile("IVCAN")
+        self._sync_instrument_enabled(False)
 
-    def _build_manual_advanced(self, layout: QtWidgets.QGridLayout) -> None:
-        self.manual_box = QtWidgets.QGroupBox("Manual Advanced")
-        self.manual_box.setObjectName("innerPanel")
-        mv = QtWidgets.QGridLayout(self.manual_box)
-        mv.setContentsMargins(12, 10, 12, 10)
-        mv.setHorizontalSpacing(12)
-        mv.setVerticalSpacing(8)
+    def profile_display_name(self) -> str:
+        return "Omni Trainer" if self._profile == "IVCAN" else "Demonstrator"
 
-        self.rb_m_udp = QtWidgets.QRadioButton("UDP")
-        self.rb_m_tcp = QtWidgets.QRadioButton("TCP")
-        self.rb_m_udp.setChecked(True)
+    def selected_profile(self) -> str:
+        return self._profile
 
-        mode_row = QtWidgets.QHBoxLayout()
-        mode_row.setSpacing(10)
-        mode_row.addWidget(self.rb_m_udp)
-        mode_row.addWidget(self.rb_m_tcp)
-        mode_row.addStretch(1)
-        w_mode = QtWidgets.QWidget()
-        w_mode.setLayout(mode_row)
-
-        self.sp_listen_udp = QtWidgets.QSpinBox()
-        self.sp_listen_udp.setRange(1, 65535)
-        self.sp_listen_udp.setValue(19856)
-
-        self.ed_tcp_ip = QtWidgets.QLineEdit("192.168.144.11")
-        self.sp_tcp_port = QtWidgets.QSpinBox()
-        self.sp_tcp_port.setRange(1, 65535)
-        self.sp_tcp_port.setValue(20001)
-
-        self.sp_tcp_server = QtWidgets.QSpinBox()
-        self.sp_tcp_server.setRange(0, 65535)
-        self.sp_tcp_server.setValue(5760)
-
-        self.cb_primer = QtWidgets.QCheckBox("Primer (UDP only)")
-        self.cb_primer.setChecked(True)
-
-        self.ed_primer_ip = QtWidgets.QLineEdit("192.168.144.12")
-        self.sp_primer_port = QtWidgets.QSpinBox()
-        self.sp_primer_port.setRange(1, 65535)
-        self.sp_primer_port.setValue(19856)
-
-        self.cb_sudo = QtWidgets.QCheckBox("Administrator")
-        self.cb_sudo.setChecked(False)
-
-        self.txt_targets = QtWidgets.QPlainTextEdit()
-        self.txt_targets.setPlaceholderText("Targets, one per line: IP:PORT")
-        self.txt_targets.setMinimumHeight(100)
-        self.txt_targets.setMaximumHeight(140)
-
-        mv.addWidget(QtWidgets.QLabel("Input Mode"), 0, 0)
-        mv.addWidget(w_mode, 0, 1, 1, 3)
-        mv.addWidget(QtWidgets.QLabel("Listen UDP"), 1, 0)
-        mv.addWidget(self.sp_listen_udp, 1, 1)
-        mv.addWidget(QtWidgets.QLabel("TCP Server Port"), 2, 0)
-        mv.addWidget(self.sp_tcp_server, 2, 1)
-        mv.addWidget(QtWidgets.QLabel("TCP Upstream IP"), 3, 0)
-        mv.addWidget(self.ed_tcp_ip, 3, 1, 1, 3)
-        mv.addWidget(QtWidgets.QLabel("TCP Port"), 4, 0)
-        mv.addWidget(self.sp_tcp_port, 4, 1)
-        mv.addWidget(self.cb_primer, 5, 0, 1, 2)
-        mv.addWidget(self.cb_sudo, 5, 2, 1, 2)
-        mv.addWidget(QtWidgets.QLabel("Primer Upstream IP"), 6, 0)
-        mv.addWidget(self.ed_primer_ip, 6, 1, 1, 3)
-        mv.addWidget(QtWidgets.QLabel("Primer Port"), 7, 0)
-        mv.addWidget(self.sp_primer_port, 7, 1)
-        mv.addWidget(QtWidgets.QLabel("Targets (Manual)"), 8, 0, 1, 4)
-        mv.addWidget(self.txt_targets, 9, 0, 1, 4)
-        mv.setColumnStretch(1, 1)
-        mv.setColumnStretch(3, 1)
-
-        layout.addWidget(self.manual_box, 3, 0, 1, 4)
-        self.manual_box.setVisible(False)
-
-    def _setup_connections(self) -> None:
-        self.rb_hm30.toggled.connect(self._apply_tel_profile_ui)
-        self.rb_ivcan.toggled.connect(self._apply_tel_profile_ui)
-        self.rb_manual.toggled.connect(self._apply_tel_profile_ui)
-
-        self.cb_t_pc1.toggled.connect(self._sync_targets_from_checkboxes)
-        self.cb_t_pc2.toggled.connect(self._sync_targets_from_checkboxes)
-        self.sp_target_port.valueChanged.connect(lambda _v: self._sync_targets_from_checkboxes())
-        self.btn_copy_targets.clicked.connect(
-            lambda: self.targets_copy_requested.emit(self.generated_targets_text())
+    def set_profile(self, profile: str) -> None:
+        if profile not in {"HM30", "IVCAN"}:
+            return
+        self._profile = profile
+        preset = self.config.get("telemetry", {}).get("input_presets", {}).get(profile, {})
+        widgets = (
+            self.sp_listen_udp,
+            self.ed_tcp_ip,
+            self.sp_tcp_port,
+            self.cb_primer,
+            self.ed_primer_ip,
+            self.sp_primer_port,
         )
+        for widget in widgets:
+            widget.blockSignals(True)
+        self.sp_listen_udp.setValue(int(preset.get("listen_udp", 19856)))
+        self.ed_tcp_ip.setText(str(preset.get("tcp_up_ip", "")))
+        self.sp_tcp_port.setValue(max(1, int(preset.get("tcp_up_port", 1))))
+        self.cb_primer.setChecked(bool(preset.get("primer_enabled", False)))
+        self.ed_primer_ip.setText(str(preset.get("primer_ip", "")))
+        self.sp_primer_port.setValue(max(1, int(preset.get("primer_port", 1))))
+        for widget in widgets:
+            widget.blockSignals(False)
+        self.lbl_profile.setText(self.profile_display_name())
+        self.lbl_endpoint.setText(self.effective_connection_summary())
+        tcp = str(preset.get("mode", "UDP")).upper() == "TCP"
+        self.ed_tcp_ip.setEnabled(tcp)
+        self.sp_tcp_port.setEnabled(tcp)
+        self.sp_listen_udp.setEnabled(not tcp)
+        self.cb_primer.setEnabled(not tcp)
+        self.ed_primer_ip.setEnabled(not tcp and self.cb_primer.isChecked())
+        self.sp_primer_port.setEnabled(not tcp and self.cb_primer.isChecked())
+        self.settings_changed.emit()
 
-        self.rb_m_udp.toggled.connect(self._apply_manual_mode_ui)
-        self.rb_m_tcp.toggled.connect(self._apply_manual_mode_ui)
-        self.cb_espusr_enable.toggled.connect(self._sync_espusr_ui)
+    def effective_connection_summary(self) -> str:
+        preset = self.config.get("telemetry", {}).get("input_presets", {}).get(
+            self._profile, {}
+        )
+        mode = str(preset.get("mode", "UDP")).upper()
+        if mode == "TCP":
+            return f"TCP · {self.ed_tcp_ip.text().strip()}:{int(self.sp_tcp_port.value())}"
+        return f"UDP · 0.0.0.0:{int(self.sp_listen_udp.value())}"
+
+    def set_target_enabled(self, name: str, enabled: bool) -> None:
+        if name in self._targets_enabled:
+            self._targets_enabled[name] = bool(enabled)
+            self.settings_changed.emit()
+
+    def target_enabled(self, name: str) -> bool:
+        return self._targets_enabled.get(name, False)
 
     def generated_targets_text(self) -> str:
-        return (self._targets_generated or "").strip()
+        telemetry = self.config.get("telemetry", {})
+        targets = telemetry.get("targets", {})
+        port = int(telemetry.get("default_target_port", 14550))
+        return "\n".join(
+            f"{targets[name]}:{port}"
+            for name in ("Instructor", "Student")
+            if self.target_enabled(name) and name in targets
+        )
 
     def get_router_options(self) -> dict:
-        prof = self.selected_profile()
-        if prof == "MANUAL":
-            in_mode = "UDP" if self.rb_m_udp.isChecked() else "TCP"
-            targets_text = self.txt_targets.toPlainText().strip()
-        else:
-            presets = self.config.get("telemetry", {}).get("input_presets", {})
-            in_mode = presets.get(prof, {}).get("mode", "UDP")
-            targets_text = self.generated_targets_text()
-
+        preset = self.config.get("telemetry", {}).get("input_presets", {}).get(
+            self._profile, {}
+        )
         return {
-            "in_mode": in_mode,
+            "in_mode": str(preset.get("mode", "UDP")),
             "listen_udp_port": int(self.sp_listen_udp.value()),
             "tcp_up_ip": self.ed_tcp_ip.text().strip(),
             "tcp_up_port": int(self.sp_tcp_port.value()),
             "tcp_server_port_ui": int(self.sp_tcp_server.value()),
-            "targets_text": targets_text,
+            "targets_text": self.generated_targets_text(),
             "primer_enabled": self.cb_primer.isChecked(),
             "primer_up_ip": self.ed_primer_ip.text().strip(),
             "primer_up_port": int(self.sp_primer_port.value()),
@@ -226,73 +217,124 @@ class TelemetryPanel(QtWidgets.QGroupBox):
             "espusr_port": int(self.sp_espusr_port.value()),
         }
 
-    def selected_profile(self) -> str:
-        if self.rb_ivcan.isChecked():
-            return "IVCAN"
-        if self.rb_manual.isChecked():
-            return "MANUAL"
-        return "HM30"
+    def _sync_instrument_enabled(self, enabled: bool) -> None:
+        for widget in (
+            self.cb_espusr_mode,
+            self.ed_espusr_ip,
+            self.sp_espusr_port,
+            *self.instrument_detail_labels,
+        ):
+            widget.setEnabled(enabled)
+            widget.setVisible(enabled)
 
-    def _sync_targets_from_checkboxes(self) -> None:
-        port = int(self.sp_target_port.value())
-        targets_cfg = self.config.get("telemetry", {}).get("targets", {})
 
-        lines = []
-        if self.cb_t_pc1.isChecked() and "Instructor" in targets_cfg:
-            lines.append(f"{targets_cfg['Instructor']}:{port}")
-        if self.cb_t_pc2.isChecked() and "Student" in targets_cfg:
-            lines.append(f"{targets_cfg['Student']}:{port}")
+class TelemetryOperatePanel(QtWidgets.QFrame):
+    settings_requested = QtCore.pyqtSignal()
+    targets_copy_requested = QtCore.pyqtSignal(str)
+    target_toggled = QtCore.pyqtSignal(str, bool)
 
-        txt = "\n".join(lines).strip()
-        if not self.rb_manual.isChecked():
-            self.txt_targets.blockSignals(True)
-            self.txt_targets.setPlainText(txt if txt else "")
-            self.txt_targets.blockSignals(False)
+    def __init__(self, config: dict, parent=None):
+        super().__init__(parent)
+        self.setObjectName("operatePanel")
+        self.config = config
+        root = QtWidgets.QVBoxLayout(self)
+        root.setContentsMargins(24, 18, 24, 14)
+        root.setSpacing(0)
+        header = QtWidgets.QHBoxLayout()
+        title = QtWidgets.QLabel("Telemetry")
+        title.setObjectName("panelTitle")
+        self.lbl_profile = QtWidgets.QLabel("Omni Trainer")
+        self.lbl_profile.setObjectName("sourceName")
+        self.lbl_status = QtWidgets.QLabel("Stopped")
+        self.lbl_status.setObjectName("panelStatus")
+        header.addWidget(title)
+        header.addStretch(1)
+        header.addWidget(self.lbl_status)
+        root.addLayout(header)
+        root.addSpacing(8)
+        root.addWidget(self.lbl_profile)
+        self.lbl_connection = QtWidgets.QLabel()
+        set_muted_label(self.lbl_connection)
+        root.addWidget(self.lbl_connection)
+        root.addSpacing(8)
+        root.addWidget(self._separator())
 
-        self._targets_generated = txt
-        self.settings_changed.emit()
+        targets = config.get("telemetry", {}).get("targets", {})
+        port = int(config.get("telemetry", {}).get("default_target_port", 14550))
+        self.target_checkboxes = {}
+        for name in ("Instructor", "Student"):
+            row = QtWidgets.QFrame()
+            row.setObjectName("operateListRow")
+            row.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+            row.setMinimumHeight(54)
+            layout = QtWidgets.QHBoxLayout(row)
+            layout.setContentsMargins(2, 7, 2, 7)
+            layout.setSpacing(24)
+            checkbox = QtWidgets.QCheckBox()
+            checkbox.setChecked(True)
+            target_widget = QtWidgets.QWidget()
+            target_widget.setFixedHeight(62)
+            target_text = QtWidgets.QVBoxLayout(target_widget)
+            target_text.setContentsMargins(0, 0, 0, 0)
+            target_text.setSpacing(1)
+            name_label = QtWidgets.QLabel(name)
+            name_label.setObjectName("sourceName")
+            address = QtWidgets.QLabel(str(targets.get(name, "N/A")))
+            address.setObjectName("targetAddress")
+            layout.addWidget(checkbox)
+            target_text.addWidget(name_label)
+            target_text.addWidget(address)
+            layout.addWidget(target_widget, 1, QtCore.Qt.AlignVCenter)
+            root.addWidget(row)
+            if name == "Instructor":
+                root.addWidget(self._separator())
+            self.target_checkboxes[name] = checkbox
+            checkbox.toggled.connect(
+                lambda enabled, target=name: self.target_toggled.emit(target, enabled)
+            )
 
-    def _sync_espusr_ui(self) -> None:
-        on = self.cb_espusr_enable.isChecked()
-        self.cb_espusr_mode.setEnabled(on)
-        self.ed_espusr_ip.setEnabled(on)
-        self.sp_espusr_port.setEnabled(on)
-        self.settings_changed.emit()
+        footer = QtWidgets.QHBoxLayout()
+        settings = QtWidgets.QToolButton()
+        settings.setText("Connection settings  →")
+        copy = QtWidgets.QToolButton()
+        copy.setText("Copy targets")
+        settings.setProperty("role", "link")
+        copy.setProperty("role", "link")
+        footer.addWidget(settings)
+        footer.addStretch(1)
+        footer.addWidget(copy)
+        root.addLayout(footer)
+        settings.clicked.connect(self.settings_requested)
+        copy.clicked.connect(self._copy_targets)
 
-    def _apply_manual_mode_ui(self) -> None:
-        udp = self.rb_m_udp.isChecked()
-        self.sp_listen_udp.setEnabled(udp)
-        self.cb_primer.setEnabled(udp)
-        self.ed_primer_ip.setEnabled(udp)
-        self.sp_primer_port.setEnabled(udp)
-        self.ed_tcp_ip.setEnabled(not udp)
-        self.sp_tcp_port.setEnabled(not udp)
-        self.settings_changed.emit()
+    @staticmethod
+    def _separator() -> QtWidgets.QFrame:
+        line = QtWidgets.QFrame()
+        line.setObjectName("operateSeparator")
+        line.setFrameShape(QtWidgets.QFrame.HLine)
+        line.setFixedHeight(1)
+        return line
 
-    def _apply_tel_profile_ui(self) -> None:
-        prof = self.selected_profile()
-        manual = prof == "MANUAL"
+    def sync_from_settings(self, settings: TelemetryPanel) -> None:
+        self.lbl_profile.setText(settings.profile_display_name())
+        mode = settings.effective_connection_summary().partition("·")[0].strip()
+        self.lbl_connection.setText(f"{mode} connection")
+        for name, checkbox in self.target_checkboxes.items():
+            checkbox.blockSignals(True)
+            checkbox.setChecked(settings.target_enabled(name))
+            checkbox.blockSignals(False)
 
-        self.manual_box.setVisible(manual)
-        self.txt_targets.setReadOnly(not manual)
+    def set_service_state(self, state: str) -> None:
+        self.lbl_status.setText(state.title())
+        self.lbl_status.setProperty("serviceState", state)
+        refresh_style(self.lbl_status)
 
-        presets = self.config.get("telemetry", {}).get("input_presets", {})
-        if prof in presets:
-            p = presets[prof]
-            if p.get("mode") == "UDP":
-                self.rb_m_udp.setChecked(True)
-            else:
-                self.rb_m_tcp.setChecked(True)
-
-            self.sp_listen_udp.setValue(int(p.get("listen_udp", 19856)))
-            self.cb_primer.setChecked(bool(p.get("primer_enabled", False)))
-            self.ed_primer_ip.setText(str(p.get("primer_ip", "")))
-            self.sp_primer_port.setValue(int(p.get("primer_port", 0)))
-
-            if p.get("mode") == "TCP":
-                self.ed_tcp_ip.setText(str(p.get("tcp_up_ip", "")))
-                self.sp_tcp_port.setValue(int(p.get("tcp_up_port", 0)))
-
-            self._apply_manual_mode_ui()
-
-        self._sync_targets_from_checkboxes()
+    def _copy_targets(self) -> None:
+        targets = self.config.get("telemetry", {}).get("targets", {})
+        port = int(self.config.get("telemetry", {}).get("default_target_port", 14550))
+        text = "\n".join(
+            f"{targets[name]}:{port}"
+            for name, checkbox in self.target_checkboxes.items()
+            if checkbox.isChecked() and name in targets
+        )
+        self.targets_copy_requested.emit(text)

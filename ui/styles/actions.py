@@ -72,6 +72,32 @@ ACTION_STYLES = """
         border-color: #c24038;
     }
 
+    QPushButton[serviceState="stopped"],
+    QPushButton[serviceState="failed"] {
+        color: #ffffff;
+        background: #963b36;
+        border-color: #bd554e;
+    }
+
+    QPushButton[serviceState="running"] {
+        color: #ffffff;
+        background: #28785f;
+        border-color: #3fa47e;
+    }
+
+    QPushButton[serviceState="starting"],
+    QPushButton[serviceState="stopping"] {
+        color: #ffffff;
+        background: #9a6a22;
+        border-color: #d49a3a;
+    }
+
+    QPushButton[serviceState="neutral"] {
+        color: #f2f2ef;
+        background: #252d31;
+        border-color: #445158;
+    }
+
     QPushButton[role="primary"]:disabled,
     QPushButton[role="danger"]:disabled {
         color: #6f7777;
@@ -101,5 +127,20 @@ ACTION_STYLES = """
         color: #070909;
         background: #ffffff;
         border-color: #ffffff;
+    }
+
+    QToolButton[role="link"] {
+        color: #28d2d4;
+        background: transparent;
+        border: none;
+        padding: 4px 2px;
+        min-height: 22px;
+    }
+
+    QToolButton[role="link"]:hover {
+        color: #7fecee;
+        background: transparent;
+        border: none;
+        text-decoration: underline;
     }
 """

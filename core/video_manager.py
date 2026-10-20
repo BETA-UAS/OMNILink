@@ -1,32 +1,62 @@
+import logging
+import time
 from pathlib import Path
-from typing import List, Optional
-
-from PyQt5 import QtCore
+from typing import Dict, List, Optional
 
 from core.config_models import VideoConfig, VideoSource
+from core.diagnostics import SuppressingLogger
 from core.video_config import active_video_sources, build_ffmpeg_args, validate_video_config
+from PyQt5 import QtCore
+
+STARTUP_GRACE_SEC = 8.0
+STALL_TIMEOUT_SEC = 10.0
+STABLE_STREAM_SEC = 30.0
+RETRY_DELAYS_SEC = (2, 5, 10, 30)
+PROCESS_STOP_DEADLINE_MS = 1500
+MAX_OUTPUT_BYTES_PER_EVENT = 65536
 
 
 class VideoManager(QtCore.QObject):
     status_changed = QtCore.pyqtSignal()
     message = QtCore.pyqtSignal(str)
+    failed = QtCore.pyqtSignal(str)
+    source_status_changed = QtCore.pyqtSignal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-
         self.mediamtx_process: Optional[QtCore.QProcess] = None
         self.ffmpeg_processes: List[QtCore.QProcess] = []
+        self._publishers: Dict[str, dict] = {}
+        self._session = 0
         self._stopping = False
+        self._config: Optional[VideoConfig] = None
+        self._passthrough = False
+        self._noisy_log = SuppressingLogger(logging.getLogger("video.subprocess"))
 
         self.watchdog = QtCore.QTimer(self)
-        self.watchdog.setInterval(700)
+        self.watchdog.setInterval(1000)
         self.watchdog.timeout.connect(self._watch)
 
     def is_running(self) -> bool:
         return bool(
-            self.mediamtx_process is not None
-            or len(self.ffmpeg_processes) > 0
+            self.mediamtx_process and self.mediamtx_process.state() == QtCore.QProcess.Running
         )
+
+    def process_ids(self):
+        result = []
+        if self.mediamtx_process:
+            result.append(("MediaMTX", int(self.mediamtx_process.processId())))
+        for path, record in self._publishers.items():
+            process = record.get("process")
+            if process:
+                result.append((f"FFmpeg:{path}", int(process.processId())))
+        return result
+
+    def source_statuses(self) -> Dict[str, str]:
+        return {path: record["state"] for path, record in self._publishers.items()}
+
+    def published_bytes(self) -> int:
+        return sum(int(record.get("published_bytes", 0)) for record in self._publishers.values())
 
     def start(
         self,
@@ -34,228 +64,350 @@ class VideoManager(QtCore.QObject):
         out_port: int,
         sources: List[VideoSource],
         global_bitrate_kbps: int,
-        webcam_res: str,
-        webcam_fps: int,
+        passthrough: bool = False,
     ) -> Optional[str]:
-        if self.is_running():
+        if self.mediamtx_process is not None or self._publishers:
             return None
-
         config = VideoConfig(
             mediamtx_bin=mediamtx_bin,
             out_port=out_port,
             sources=sources,
             global_bitrate_kbps=global_bitrate_kbps,
-            webcam_res=webcam_res,
-            webcam_fps=webcam_fps,
         )
-
-        validation_error = validate_video_config(config)
-        if validation_error:
-            return validation_error
+        error = validate_video_config(config)
+        if error:
+            return error
 
         active_sources = active_video_sources(config.sources)
-        if not active_sources:
-            return "Tidak ada source yang aktif"
+        normalized_paths = [self._normalize_path(source.out_path) for source in active_sources]
+        try:
+            config_path = self._write_mediamtx_cfg(normalized_paths, int(config.out_port))
+        except OSError as exc:
+            return f"Unable to write MediaMTX configuration: {exc}"
 
-        normalized_paths = [
-            self._normalize_path(source.out_path)
+        self._session += 1
+        session = self._session
+        self._stopping = False
+        self._config = config
+        self._passthrough = passthrough
+        self._publishers = {
+            self._normalize_path(source.out_path): {
+                "source": source,
+                "process": None,
+                "retry_timer": None,
+                "retry_index": 0,
+                "state": "waiting",
+                "last_progress": None,
+                "started_at": 0.0,
+                "stable_since": None,
+                "buffer": "",
+                "published_bytes": 0,
+                "last_reported_size": 0,
+            }
             for source in active_sources
-        ]
+        }
+        self._emit_source_status()
 
-        config_path = self._write_mediamtx_cfg(
-            normalized_paths,
-            int(config.out_port),
+        process = QtCore.QProcess(self)
+        self.mediamtx_process = process
+        process.setProcessChannelMode(QtCore.QProcess.MergedChannels)
+        process.stateChanged.connect(lambda _state, s=session: self._media_state_changed(s))
+        process.started.connect(lambda s=session: self._media_started(s))
+        process.errorOccurred.connect(lambda _error, s=session: self._media_error(s))
+        process.finished.connect(
+            lambda code, status, s=session: self._media_finished(s, code, status)
         )
-
-        self.message.emit(f"Starting MediaMTX on RTSP port {int(config.out_port)}")
-        self.message.emit(f"MediaMTX config: {config_path}")
-
-        self.mediamtx_process = QtCore.QProcess(self)
-        self.mediamtx_process.setProcessChannelMode(QtCore.QProcess.MergedChannels)
-
-        self.mediamtx_process.readyReadStandardOutput.connect(
-            lambda: self._log_process_output("mediamtx", self.mediamtx_process)
-        )
-
-        self.mediamtx_process.finished.connect(
-            lambda code, status: self._process_finished("mediamtx", code, status)
-        )
-
-        self.mediamtx_process.start(config.mediamtx_bin, [str(config_path)])
-
-        if not self.mediamtx_process.waitForStarted(2500):
-            error_text = self.mediamtx_process.errorString()
-            self.mediamtx_process.deleteLater()
-            self.mediamtx_process = None
-            return f"mediamtx gagal start: {error_text}"
-
-        def start_ffmpeg_publishers() -> None:
-            if not self.mediamtx_process:
-                return
-
-            if self.mediamtx_process.state() == QtCore.QProcess.NotRunning:
-                self.message.emit("MediaMTX stopped before ffmpeg publishers started")
-                self.stop()
-                return
-
-            self.ffmpeg_processes = []
-
-            for source in active_sources:
-                out_path = self._normalize_path(source.out_path)
-                publish_url = f"rtsp://127.0.0.1:{int(config.out_port)}/{out_path}"
-
-                args = build_ffmpeg_args(
-                    source=source,
-                    publish_url=publish_url,
-                    bitrate_kbps=int(config.global_bitrate_kbps),
-                    webcam_res=config.webcam_res,
-                    webcam_fps=int(config.webcam_fps),
-                )
-
-                process = QtCore.QProcess(self)
-                process.setProcessChannelMode(QtCore.QProcess.MergedChannels)
-
-                process.readyReadStandardOutput.connect(
-                    lambda p=process: self._log_process_output("ffmpeg", p)
-                )
-
-                process.finished.connect(
-                    lambda code, status, path=out_path: self._process_finished(
-                        f"ffmpeg:{path}",
-                        code,
-                        status,
-                    )
-                )
-
-                self.message.emit(
-                    f"Starting ffmpeg publisher: {source.input_text.strip()} -> {publish_url}"
-                )
-
-                process.start("ffmpeg", args)
-
-                if not process.waitForStarted(2500):
-                    self.message.emit(
-                        f"ffmpeg gagal start untuk {out_path}: {process.errorString()}"
-                    )
-                    try:
-                        process.deleteLater()
-                    except RuntimeError:
-                        pass
-                    self.stop()
-                    return
-
-                self.ffmpeg_processes.append(process)
-
-            self.watchdog.start()
-            self.status_changed.emit()
-
-        QtCore.QTimer.singleShot(700, start_ffmpeg_publishers)
-
+        process.readyReadStandardOutput.connect(lambda s=session: self._drain_media_output(s))
+        logging.info("Starting MediaMTX on RTSP port %d", int(config.out_port))
+        process.start(config.mediamtx_bin, [str(config_path)])
         self.status_changed.emit()
         return None
 
     def stop(self) -> None:
         if self._stopping:
             return
-
         self._stopping = True
+        self._session += 1
         self.watchdog.stop()
-
-        for process in list(self.ffmpeg_processes):
-            self._stop_process(process)
-
+        logging.info("Stopping video service")
+        for record in self._publishers.values():
+            timer = record.get("retry_timer")
+            if timer:
+                timer.stop()
+                timer.deleteLater()
+                record["retry_timer"] = None
+            process = record.get("process")
+            if process:
+                self._terminate_process(process)
+            record["state"] = "stopped"
         if self.mediamtx_process:
-            self._stop_process(self.mediamtx_process)
-
-        for process in list(self.ffmpeg_processes):
-            try:
-                process.deleteLater()
-            except RuntimeError:
-                pass
-
-        self.ffmpeg_processes = []
-
-        if self.mediamtx_process:
-            try:
-                self.mediamtx_process.deleteLater()
-            except RuntimeError:
-                pass
-
-        self.mediamtx_process = None
-        self._stopping = False
-
-        self.message.emit("Video manager stopped")
+            self._terminate_process(self.mediamtx_process)
+        else:
+            self._finish_stop()
+        self._emit_source_status()
         self.status_changed.emit()
+
+    def emergency_shutdown(self) -> None:
+        """Terminate and immediately kill remaining children during application exit."""
+        self.stop()
+        processes = [self.mediamtx_process]
+        processes.extend(record.get("process") for record in self._publishers.values())
+        for process in processes:
+            if process and process.state() != QtCore.QProcess.NotRunning:
+                process.kill()
+
+    def _media_started(self, session: int) -> None:
+        if session != self._session or self._stopping:
+            return
+        self.watchdog.start()
+        for path in self._publishers:
+            QtCore.QTimer.singleShot(300, lambda p=path, s=session: self._start_publisher(p, s))
+        self.status_changed.emit()
+
+    def _media_state_changed(self, session: int) -> None:
+        if session == self._session:
+            self.status_changed.emit()
+
+    def _media_error(self, session: int) -> None:
+        if session != self._session or self._stopping or not self.mediamtx_process:
+            return
+        message = f"MediaMTX failed to start: {self.mediamtx_process.errorString()}"
+        logging.error(message)
+        self.failed.emit(message)
+
+    def _media_finished(self, session: int, code: int, _status) -> None:
+        process = self.mediamtx_process
+        if process:
+            process.deleteLater()
+        self.mediamtx_process = None
+        if session != self._session:
+            if self._stopping:
+                self._finish_stop()
+            return
+        if not self._stopping:
+            message = f"MediaMTX exited unexpectedly (code {code})"
+            logging.error(message)
+            self.failed.emit(message)
+            self.stop()
+        else:
+            self._finish_stop()
+        self.status_changed.emit()
+
+    def _start_publisher(self, path: str, session: int) -> None:
+        if session != self._session or self._stopping or not self.is_running():
+            return
+        record = self._publishers.get(path)
+        if not record or record.get("process") is not None:
+            return
+        timer = record.get("retry_timer")
+        if timer:
+            timer.stop()
+            timer.deleteLater()
+            record["retry_timer"] = None
+
+        config = self._config
+        if not config:
+            return
+        publish_url = f"rtsp://127.0.0.1:{int(config.out_port)}/{path}"
+        args = build_ffmpeg_args(
+            source=record["source"],
+            publish_url=publish_url,
+            bitrate_kbps=int(config.global_bitrate_kbps),
+            passthrough=self._passthrough,
+        )
+        process = QtCore.QProcess(self)
+        process.setProcessChannelMode(QtCore.QProcess.MergedChannels)
+        record.update(
+            process=process,
+            state="starting",
+            last_progress=None,
+            started_at=time.monotonic(),
+            stable_since=None,
+            buffer="",
+            last_reported_size=0,
+        )
+        self.ffmpeg_processes.append(process)
+        process.started.connect(
+            lambda p=path, s=session, q=process: self._publisher_started(p, s, q)
+        )
+        process.readyReadStandardOutput.connect(
+            lambda p=path, s=session, q=process: self._drain_publisher_output(p, s, q)
+        )
+        process.errorOccurred.connect(
+            lambda _error, p=path, s=session, q=process: self._publisher_error(p, s, q)
+        )
+        process.finished.connect(
+            lambda code, status, p=path, s=session, q=process: self._publisher_finished(
+                p, s, q, code, status
+            )
+        )
+        logging.info("Starting camera publisher %s", path)
+        process.start("ffmpeg", args)
+        self._emit_source_status()
+
+    def _publisher_started(self, path: str, session: int, process: QtCore.QProcess) -> None:
+        record = self._publishers.get(path)
+        if session != self._session or not record or record.get("process") is not process:
+            self._terminate_process(process)
+            return
+        record["state"] = "waiting"
+        self._emit_source_status()
+
+    def _publisher_error(self, path: str, session: int, process: QtCore.QProcess) -> None:
+        record = self._publishers.get(path)
+        if session != self._session or not record or record.get("process") is not process:
+            return
+        logging.warning("Camera %s process error: %s", path, process.errorString())
+        record["state"] = "waiting"
+        self._emit_source_status()
+
+    def _publisher_finished(
+        self, path: str, session: int, process: QtCore.QProcess, code: int, _status
+    ) -> None:
+        if process in self.ffmpeg_processes:
+            self.ffmpeg_processes.remove(process)
+        process.deleteLater()
+        record = self._publishers.get(path)
+        if not record or record.get("process") is not process:
+            return
+        record["process"] = None
+        if session != self._session or self._stopping:
+            record["state"] = "stopped"
+            self._emit_source_status()
+            if self._stopping:
+                self._finish_stop()
+            return
+        logging.warning("Camera %s publisher exited (code %d); waiting to retry", path, code)
+        record["state"] = "waiting"
+        self._schedule_retry(path, session)
+        self._emit_source_status()
+
+    def _schedule_retry(self, path: str, session: int) -> None:
+        record = self._publishers.get(path)
+        if not record or record.get("retry_timer") is not None or record.get("process") is not None:
+            return
+        index = min(record["retry_index"], len(RETRY_DELAYS_SEC) - 1)
+        delay = RETRY_DELAYS_SEC[index]
+        record["retry_index"] = min(index + 1, len(RETRY_DELAYS_SEC) - 1)
+        timer = QtCore.QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda p=path, s=session: self._retry_timeout(p, s))
+        record["retry_timer"] = timer
+        timer.start(delay * 1000)
+        logging.info("Camera %s retry scheduled in %d seconds", path, delay)
+
+    def _retry_timeout(self, path: str, session: int) -> None:
+        record = self._publishers.get(path)
+        if not record:
+            return
+        timer = record.get("retry_timer")
+        record["retry_timer"] = None
+        if timer:
+            timer.deleteLater()
+        self._start_publisher(path, session)
+
+    def _drain_publisher_output(self, path: str, session: int, process: QtCore.QProcess) -> None:
+        data = bytes(process.readAllStandardOutput())
+        record = self._publishers.get(path)
+        if session != self._session or not record or record.get("process") is not process:
+            return
+        text = record["buffer"] + data[:MAX_OUTPUT_BYTES_PER_EVENT].decode("utf-8", "replace")
+        lines = text.splitlines(keepends=True)
+        record["buffer"] = ""
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            record["buffer"] = lines.pop()[-4096:]
+        now = time.monotonic()
+        for raw in lines[:512]:
+            line = raw.strip()
+            if line.startswith(("out_time_ms=", "out_time_us=", "frame=")):
+                value = line.partition("=")[2].strip()
+                if value and value != "N/A" and value != "0":
+                    record["last_progress"] = now
+                    if record["stable_since"] is None:
+                        record["stable_since"] = now
+                    if record["state"] != "streaming":
+                        record["state"] = "streaming"
+                        self._emit_source_status()
+            elif line.startswith("total_size="):
+                value = line.partition("=")[2].strip()
+                if value.isdigit():
+                    current_size = int(value)
+                    previous_size = int(record.get("last_reported_size", 0))
+                    if current_size >= previous_size:
+                        record["published_bytes"] += current_size - previous_size
+                    record["last_reported_size"] = current_size
+            elif line and not line.startswith("progress="):
+                self._noisy_log.record(f"FFmpeg {path}: {line[:500]}")
+
+    def _drain_media_output(self, session: int) -> None:
+        if session != self._session or not self.mediamtx_process:
+            return
+        data = bytes(self.mediamtx_process.readAllStandardOutput())
+        for line in data[:MAX_OUTPUT_BYTES_PER_EVENT].decode("utf-8", "replace").splitlines()[:256]:
+            if line.strip():
+                self._noisy_log.record(f"MediaMTX: {line.strip()[:500]}")
 
     def _watch(self) -> None:
         if self._stopping:
             return
+        now = time.monotonic()
+        for path, record in list(self._publishers.items()):
+            process = record.get("process")
+            if not process or process.state() != QtCore.QProcess.Running:
+                continue
+            last = record.get("last_progress")
+            age = now - record["started_at"]
+            stalled = (last is None and age > STARTUP_GRACE_SEC + STALL_TIMEOUT_SEC) or (
+                last is not None and now - last > STALL_TIMEOUT_SEC
+            )
+            if stalled:
+                logging.warning("Camera %s stalled; restarting publisher", path)
+                record["state"] = "waiting"
+                self._emit_source_status()
+                self._terminate_process(process)
+                continue
+            stable_since = record.get("stable_since")
+            if stable_since is not None and now - stable_since >= STABLE_STREAM_SEC:
+                record["retry_index"] = 0
 
-        if self.mediamtx_process and self.mediamtx_process.state() == QtCore.QProcess.NotRunning:
-            self.message.emit("Watchdog: MediaMTX is not running")
-            self.stop()
+    def _terminate_process(self, process: QtCore.QProcess) -> None:
+        if process.state() == QtCore.QProcess.NotRunning:
             return
+        process.terminate()
+        QtCore.QTimer.singleShot(PROCESS_STOP_DEADLINE_MS, lambda p=process: self._safe_kill(p))
 
-        for process in list(self.ffmpeg_processes):
-            if process.state() == QtCore.QProcess.NotRunning:
-                self.message.emit("Watchdog: ffmpeg publisher is not running")
-                self.stop()
-                return
-
-    def _process_finished(self, name: str, code: int, status) -> None:
-        if self._stopping:
-            return
-
-        self.message.emit(f"{name} stopped unexpectedly, exit code={code}, status={status}")
-        self.stop()
-
-    def _log_process_output(self, name: str, process: Optional[QtCore.QProcess]) -> None:
-        if process is None:
-            return
-
+    @staticmethod
+    def _safe_kill(process: QtCore.QProcess) -> None:
         try:
-            output = bytes(process.readAllStandardOutput()).decode(
-                "utf-8",
-                errors="replace",
-            ).strip()
-
-            if output:
-                self.message.emit(f"{name}: {output}")
-
+            if process.state() != QtCore.QProcess.NotRunning:
+                process.kill()
         except RuntimeError:
-            pass
+            # The process can finish and be deleteLater()'d before this deadline.
+            return
 
-    def _write_mediamtx_cfg(self, paths: List[str], out_port: int) -> Path:
+    def _finish_stop(self) -> None:
+        if any(record.get("process") for record in self._publishers.values()):
+            return
+        self.ffmpeg_processes = []
+        self._publishers = {}
+        self._config = None
+        self._stopping = False
+        self._noisy_log.flush()
+        self.status_changed.emit()
+
+    def _emit_source_status(self) -> None:
+        self.source_status_changed.emit(self.source_statuses())
+
+    def _write_mediamtx_cfg(self, paths: List[str], out_port: int = 8554) -> Path:
         config_dir = Path.home() / ".config" / "mediamtx"
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path = config_dir / "mediamtx.yml"
-
-        lines: List[str] = [
-            f"rtspAddress: :{int(out_port)}",
-            "paths:",
-        ]
-
+        lines: List[str] = [f"rtspAddress: :{int(out_port)}", "paths:"]
         for stream_path in paths:
             clean_path = self._normalize_path(stream_path)
-            lines.append(f"  {clean_path}:")
-            lines.append("    source: publisher")
-
+            lines.extend((f"  {clean_path}:", "    source: publisher"))
         config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return config_path
-
-    def _stop_process(self, process: QtCore.QProcess) -> None:
-        try:
-            if process.state() == QtCore.QProcess.NotRunning:
-                return
-
-            process.terminate()
-
-            if not process.waitForFinished(1200):
-                process.kill()
-                process.waitForFinished(1200)
-
-        except RuntimeError:
-            pass
 
     @staticmethod
     def _normalize_path(path: str) -> str:

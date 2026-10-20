@@ -3,7 +3,6 @@ from pathlib import Path
 from core.config_models import VideoConfig, VideoSource
 from core.video_config import (
     VIDEO_TYPE_RTSP,
-    VIDEO_TYPE_WEBCAM,
     build_ffmpeg_args,
     validate_video_config,
 )
@@ -39,8 +38,6 @@ def video_config(**overrides):
             )
         ],
         "global_bitrate_kbps": 2500,
-        "webcam_res": "1280x720",
-        "webcam_fps": 30,
     }
     values.update(overrides)
     return VideoConfig(**values)
@@ -84,25 +81,8 @@ def test_validate_video_config_rejects_bad_rtsp_url():
     assert validate_video_config(config, check_tools=False) == "RTSP input harus rtsp:// untuk cam1"
 
 
-def test_validate_video_config_rejects_bad_webcam_path():
-    config = video_config(
-        sources=[VideoSource(True, VIDEO_TYPE_WEBCAM, "/dev/does-not-exist", "cam1")]
-    )
-
-    assert (
-        validate_video_config(config, check_tools=False) == "Webcam device tidak valid untuk cam1"
-    )
-
-
 def test_validate_video_config_rejects_invalid_options():
     assert validate_video_config(video_config(out_port=0), check_tools=False) == "Port RTSP invalid"
-    assert (
-        validate_video_config(video_config(webcam_res="800x600"), check_tools=False)
-        == "Resolusi webcam invalid"
-    )
-    assert (
-        validate_video_config(video_config(webcam_fps=7), check_tools=False) == "FPS webcam invalid"
-    )
     assert (
         validate_video_config(video_config(global_bitrate_kbps=100), check_tools=False)
         == "Bitrate invalid"
@@ -114,18 +94,16 @@ def test_build_ffmpeg_args_matches_working_rtsp_pipeline():
         source=video_config().sources[0],
         publish_url="rtsp://127.0.0.1:8554/cam1",
         bitrate_kbps=2500,
-        webcam_res="1280x720",
-        webcam_fps=30,
     )
 
-    assert "-progress" not in args
-    assert "-stats_period" not in args
+    assert args[args.index("-progress") + 1] == "pipe:1"
+    assert args[args.index("-threads") + 1] == "2"
     assert "-stimeout" not in args
     assert args[args.index("-rtsp_transport") + 1] == "tcp"
     assert args[-2:] == ["tcp", "rtsp://127.0.0.1:8554/cam1"]
 
 
-def test_watchdog_stops_manager_when_any_ffmpeg_process_exits(monkeypatch):
+def test_watchdog_does_not_stop_service_when_one_publisher_exits(monkeypatch):
     ensure_qt_app()
     manager = VideoManager()
     manager.mediamtx_process = FakeProcess(QtCore.QProcess.Running)
@@ -138,7 +116,7 @@ def test_watchdog_stops_manager_when_any_ffmpeg_process_exits(monkeypatch):
 
     manager._watch()
 
-    assert stopped == [True]
+    assert stopped == []
 
 
 def test_write_mediamtx_cfg_uses_simple_publisher_paths(tmp_path, monkeypatch):
@@ -149,9 +127,6 @@ def test_write_mediamtx_cfg_uses_simple_publisher_paths(tmp_path, monkeypatch):
     path = manager._write_mediamtx_cfg(["cam1", "cam2"])
 
     assert path.read_text(encoding="utf-8") == (
-        "paths:\n"
-        "  cam1:\n"
-        "    source: publisher\n"
-        "  cam2:\n"
-        "    source: publisher\n"
+        "rtspAddress: :8554\n"
+        "paths:\n  cam1:\n    source: publisher\n  cam2:\n    source: publisher\n"
     )

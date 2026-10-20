@@ -2,7 +2,6 @@ import ipaddress
 import re
 import shutil
 import subprocess
-from pathlib import Path
 from typing import List, Optional, Tuple
 
 
@@ -43,16 +42,6 @@ def is_valid_network_port(port: int) -> bool:
     except (TypeError, ValueError):
         return False
     return 1 <= numeric_port <= 65535
-
-
-def list_video_devices() -> List[str]:
-    devices: List[str] = []
-    for device_path in sorted(
-        Path("/dev").glob("video*"),
-        key=lambda path: int(re.sub(r"\D", "", path.name) or "9999"),
-    ):
-        devices.append(f"/dev/{device_path.name}")
-    return devices
 
 
 def get_socket_status_output() -> str:
@@ -138,11 +127,11 @@ def get_ipv4_address_output() -> str:
         return ""
 
 
-def select_preferred_ethernet_ipv4() -> str:
-    """Select a useful non-loopback IPv4 address for advertising local services."""
+def select_preferred_ethernet() -> Tuple[str, str]:
+    """Return the preferred interface name and non-loopback IPv4 address."""
     ip_addr_output = get_ipv4_address_output()
     if not ip_addr_output:
-        return "127.0.0.1"
+        return "Loopback", "127.0.0.1"
 
     current_if = ""
     candidates_144: List[Tuple[str, str]] = []
@@ -182,11 +171,16 @@ def select_preferred_ethernet_ipv4() -> str:
             candidates_other.append((current_if, ip))
 
     if candidates_144:
-        return candidates_144[0][1]
+        return candidates_144[0]
     if candidates_eth:
-        return candidates_eth[0][1]
+        return candidates_eth[0]
     if candidates_wifi:
-        return candidates_wifi[0][1]
+        return candidates_wifi[0]
     if candidates_other:
-        return candidates_other[0][1]
-    return "127.0.0.1"
+        return candidates_other[0]
+    return "Loopback", "127.0.0.1"
+
+
+def select_preferred_ethernet_ipv4() -> str:
+    """Select a useful non-loopback IPv4 address for advertising local services."""
+    return select_preferred_ethernet()[1]

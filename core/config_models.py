@@ -34,5 +34,3 @@ class VideoConfig:
     out_port: int
     sources: List[VideoSource]
     global_bitrate_kbps: int
-    webcam_res: str
-    webcam_fps: int

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 APP_NAME="OMNILink"
 BINARY_NAME="omnilink"
 PYTHON_BIN="${PYTHON:-python3}"
@@ -24,9 +24,27 @@ case "$(uname -m)" in
 esac
 
 VERSION="${VERSION:-$(git -C "${ROOT_DIR}" describe --tags --always --dirty 2>/dev/null || echo dev)}"
+if [[ ! "${VERSION}" =~ ^[a-zA-Z0-9][a-zA-Z0-9._+-]*$ ]]; then
+  echo "Invalid VERSION: use only letters, numbers, dots, underscores, pluses, and hyphens." >&2
+  exit 2
+fi
 OUTPUT="${ROOT_DIR}/dist/${APP_NAME}-${VERSION}-${APPIMAGE_ARCH}.AppImage"
 APPIMAGETOOL="${APPIMAGETOOL_DIR}/appimagetool-${APPIMAGE_ARCH}.AppImage"
 APPIMAGETOOL_URL="https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-${APPIMAGE_ARCH}.AppImage"
+
+remove_generated_path() {
+  local target="$1"
+  # Never accept a caller-supplied or broad directory for recursive deletion.
+  case "${target}" in
+    "${ROOT_DIR}/build/pyinstaller"|"${ROOT_DIR}/dist/${BINARY_NAME}"|"${APPDIR}")
+      rm -rf -- "${target}"
+      ;;
+    *)
+      echo "Refusing to remove unexpected build path: ${target}" >&2
+      exit 2
+      ;;
+  esac
+}
 
 if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
   echo "Python command not found: ${PYTHON_BIN}" >&2
@@ -35,6 +53,13 @@ fi
 
 if [[ ! -d "${VENV_DIR}" ]]; then
   "${PYTHON_BIN}" -m venv "${VENV_DIR}"
+elif ! "${VENV_DIR}/bin/python" -c 'import encodings, ssl' >/dev/null 2>&1; then
+  if [[ -L "${VENV_DIR}" || ! -f "${VENV_DIR}/pyvenv.cfg" ]]; then
+    echo "Refusing to replace an unexpected AppImage virtualenv: ${VENV_DIR}" >&2
+    exit 2
+  fi
+  echo "Recreating obsolete AppImage virtualenv in the repository: ${VENV_DIR}"
+  "${PYTHON_BIN}" -m venv --clear "${VENV_DIR}"
 fi
 
 # shellcheck source=/dev/null
@@ -42,13 +67,16 @@ source "${VENV_DIR}/bin/activate"
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -r "${ROOT_DIR}/requirements.txt" pyinstaller
 
-rm -rf "${ROOT_DIR}/build/pyinstaller" "${ROOT_DIR}/dist/${BINARY_NAME}" "${APPDIR}"
+remove_generated_path "${ROOT_DIR}/build/pyinstaller"
+remove_generated_path "${ROOT_DIR}/dist/${BINARY_NAME}"
+remove_generated_path "${APPDIR}"
 mkdir -p "${APPDIR}/usr/bin" "${APPIMAGETOOL_DIR}" "${ROOT_DIR}/dist"
 
 pyinstaller \
   --noconfirm \
   --clean \
   --windowed \
+  --contents-directory _internal \
   --name "${BINARY_NAME}" \
   --distpath "${ROOT_DIR}/dist" \
   --workpath "${ROOT_DIR}/build/pyinstaller" \
@@ -56,6 +84,17 @@ pyinstaller \
   --add-data "${ROOT_DIR}/config/settings.json:config" \
   --add-data "${ROOT_DIR}/ui/assets:ui/assets" \
   "${ROOT_DIR}/main.py"
+
+BUNDLE_ASSETS="${ROOT_DIR}/dist/${BINARY_NAME}/_internal/ui/assets"
+mkdir -p "${BUNDLE_ASSETS}"
+cp -a "${ROOT_DIR}/ui/assets/." "${BUNDLE_ASSETS}/"
+for asset in betawhite.png checkmark.svg radio-dot.svg; do
+  if [[ ! -s "${BUNDLE_ASSETS}/${asset}" ]] ||
+    ! cmp -s "${ROOT_DIR}/ui/assets/${asset}" "${BUNDLE_ASSETS}/${asset}"; then
+    echo "Bundled UI asset is missing or differs from source: ${asset}" >&2
+    exit 1
+  fi
+done
 
 cp -a "${ROOT_DIR}/dist/${BINARY_NAME}" "${APPDIR}/usr/bin/${BINARY_NAME}"
 cp "${ROOT_DIR}/packaging/appimage/AppRun" "${APPDIR}/AppRun"

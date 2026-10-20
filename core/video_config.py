@@ -5,19 +5,9 @@ from core.config_models import VideoConfig, VideoSource
 from core.network_utils import command_exists, is_valid_network_port
 
 VIDEO_TYPE_RTSP = "RTSP"
-VIDEO_TYPE_WEBCAM = "Webcam"
-
-RES_CHOICES = ["640x480", "1280x720", "1920x1080"]
-FPS_CHOICES = ["10", "15", "20", "25", "30", "60"]
 
 X264_PARAMS = (
-    "nal-hrd=none:"
-    "force-cfr=1:"
-    "sliced-threads=1:"
-    "sync-lookahead=0:"
-    "rc-lookahead=0:"
-    "bframes=0:"
-    "ref=1"
+    "nal-hrd=none:force-cfr=1:sliced-threads=1:sync-lookahead=0:rc-lookahead=0:bframes=0:ref=1"
 )
 
 RTSP_IO_TIMEOUT_US = 5_000_000
@@ -80,23 +70,8 @@ def validate_video_config(config: VideoConfig, check_tools: bool = True) -> Opti
             if not looks_like_rtsp(input_text):
                 return f"RTSP input harus rtsp:// untuk {out_path}"
 
-        elif source.vtype == VIDEO_TYPE_WEBCAM:
-            device_path = source.input_text.strip()
-
-            if not device_path:
-                return f"Webcam device kosong untuk {out_path}"
-
-            if not Path(device_path).exists():
-                return f"Webcam device tidak valid untuk {out_path}"
-
         else:
             return f"Tipe video tidak valid untuk {out_path}: {source.vtype}"
-
-    if config.webcam_res not in RES_CHOICES:
-        return "Resolusi webcam invalid"
-
-    if str(config.webcam_fps) not in FPS_CHOICES:
-        return "FPS webcam invalid"
 
     try:
         bitrate_kbps = int(config.global_bitrate_kbps)
@@ -113,13 +88,15 @@ def build_ffmpeg_args(
     source: VideoSource,
     publish_url: str,
     bitrate_kbps: int,
-    webcam_res: str,
-    webcam_fps: int,
+    passthrough: bool = False,
 ) -> List[str]:
     args: List[str] = [
         "-hide_banner",
         "-loglevel",
         "warning",
+        "-nostats",
+        "-progress",
+        "pipe:1",
         "-fflags",
         "nobuffer",
         "-flags",
@@ -127,64 +104,53 @@ def build_ffmpeg_args(
         "-an",
     ]
 
-    if source.vtype == VIDEO_TYPE_RTSP:
-        gop = 30
-
-        args += [
-            "-rtsp_transport",
-            "tcp",
-            "-timeout",
-            str(RTSP_IO_TIMEOUT_US),
-            "-i",
-            source.input_text.strip(),
-        ]
-
-    elif source.vtype == VIDEO_TYPE_WEBCAM:
-        gop = int(webcam_fps)
-
-        args += [
-            "-f",
-            "v4l2",
-            "-input_format",
-            "mjpeg",
-            "-framerate",
-            str(webcam_fps),
-            "-video_size",
-            webcam_res,
-            "-i",
-            source.input_text.strip(),
-        ]
-
-    else:
+    if source.vtype != VIDEO_TYPE_RTSP:
         raise ValueError(f"Unsupported video source type: {source.vtype}")
+    gop = 30
+    args += [
+        "-rtsp_transport",
+        "tcp",
+        "-timeout",
+        str(RTSP_IO_TIMEOUT_US),
+        "-i",
+        source.input_text.strip(),
+    ]
+
+    if passthrough and source.vtype == VIDEO_TYPE_RTSP:
+        args += ["-c:v", "copy"]
+    else:
+        args += [
+            "-c:v",
+            "libx264",
+            "-threads",
+            "2",
+            "-preset",
+            "ultrafast",
+            "-tune",
+            "zerolatency",
+            "-pix_fmt",
+            "yuv420p",
+            "-profile:v",
+            "baseline",
+            "-g",
+            str(gop),
+            "-keyint_min",
+            str(gop),
+            "-sc_threshold",
+            "0",
+            "-bf",
+            "0",
+            "-b:v",
+            f"{int(bitrate_kbps)}k",
+            "-maxrate",
+            f"{int(bitrate_kbps)}k",
+            "-bufsize",
+            f"{int(bitrate_kbps) * 2}k",
+            "-x264-params",
+            X264_PARAMS,
+        ]
 
     args += [
-        "-c:v",
-        "libx264",
-        "-preset",
-        "ultrafast",
-        "-tune",
-        "zerolatency",
-        "-pix_fmt",
-        "yuv420p",
-        "-profile:v",
-        "baseline",
-        "-g",
-        str(gop),
-        "-keyint_min",
-        str(gop),
-        "-sc_threshold",
-        "0",
-        "-bf",
-        "0",
-        "-b:v",
-        f"{int(bitrate_kbps)}k",
-        "-maxrate",
-        f"{int(bitrate_kbps)}k",
-        "-bufsize",
-        f"{int(bitrate_kbps) * 2}k",
-        "-x264-params",
-        X264_PARAMS,
         "-f",
         "rtsp",
         "-rtsp_transport",

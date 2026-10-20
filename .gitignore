@@ -21,6 +21,7 @@ htmlcov/
 # Build and packaging output
 build/
 dist/
+artifacts/
 *.egg-info/
 *.egg
 
@@ -35,6 +36,8 @@ omnilink.spec
 .env
 .env.*
 !.env.example
+/auto.crt
+/auto.key
 
 # Logs and runtime output
 *.log

@@ -3,6 +3,7 @@ import json
 import logging
 import signal
 import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from PyQt5 import QtWidgets
@@ -17,11 +18,21 @@ def app_base_path() -> Path:
 
 
 def setup_logging():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout)],
+    log_dir = Path.home() / ".local" / "state" / "omnilink"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    file_handler = RotatingFileHandler(
+        log_dir / "omnilink.log", maxBytes=5 * 1024 * 1024, backupCount=3
     )
+    file_handler.setLevel(logging.DEBUG)
+    terminal_handler = logging.StreamHandler(sys.stdout)
+    terminal_handler.setLevel(logging.INFO)
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=[terminal_handler, file_handler],
+    )
+    logging.getLogger("video.subprocess").propagate = False
+    logging.getLogger("video.subprocess").addHandler(file_handler)
 
 
 def load_config(config_path: str = "config/settings.json") -> dict:

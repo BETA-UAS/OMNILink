@@ -44,8 +44,8 @@ INPUT_STYLES = """
 
     QCheckBox::indicator,
     QRadioButton::indicator {
-        width: 16px;
-        height: 16px;
+        width: 20px;
+        height: 20px;
         border: 1px solid #6f7777;
         background: #070909;
     }
@@ -67,8 +67,8 @@ INPUT_STYLES = """
     QCheckBox::indicator:checked {
         image: __CHECKMARK_IMAGE__;
         color: #070909;
-        background: #f2f2ef;
-        border: 1px solid #f2f2ef;
+        background: #18c9cd;
+        border: 1px solid #30e0e3;
     }
 
     QCheckBox::indicator:checked:hover {
