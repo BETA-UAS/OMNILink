@@ -1,6 +1,7 @@
 import logging
 
 from core.diagnostics import SuppressingLogger
+from core.video_config import MAIN_CAMERA_URLS
 from core.video_manager import VideoManager
 from PyQt5 import QtCore
 
@@ -81,6 +82,41 @@ def test_only_one_pending_retry_is_created_per_camera():
     manager._schedule_retry("cam1", manager._session)
     assert manager._publishers["cam1"]["retry_timer"] is first_timer
     first_timer.stop()
+
+
+def test_main_camera_tries_viewpro_after_mt11_then_retries(monkeypatch):
+    app = ensure_app()
+    manager = VideoManager()
+    manager._session = 1
+    starts = []
+    retries = []
+    monkeypatch.setattr(
+        manager, "_start_publisher", lambda path, session: starts.append((path, session))
+    )
+    monkeypatch.setattr(
+        manager, "_schedule_retry", lambda path, session: retries.append((path, session))
+    )
+
+    first = QtCore.QProcess()
+    record = publisher_record(first)
+    record.update(source_urls=MAIN_CAMERA_URLS, source_index=0)
+    manager._publishers = {"cam1": record}
+    manager._publisher_finished("cam1", 1, first, 1, None)
+    app.processEvents()
+
+    assert record["source_index"] == 1
+    assert starts == [("cam1", 1)]
+    assert retries == []
+    assert record["process"] is None
+
+    second = QtCore.QProcess()
+    record["process"] = second
+    manager._publisher_finished("cam1", 1, second, 1, None)
+    app.processEvents()
+
+    assert record["source_index"] == 0
+    assert starts == [("cam1", 1)]
+    assert retries == [("cam1", 1)]
 
 
 def test_delayed_kill_ignores_process_already_deleted():

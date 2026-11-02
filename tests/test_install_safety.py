@@ -81,3 +81,49 @@ def test_setup_reports_missing_runtime_instead_of_claiming_completion():
     assert result.returncode != 0
     assert "Setup is incomplete" in result.stderr
     assert "mavlink-routerd" in result.stderr
+
+
+def test_single_system_opt_in_enables_router_source_fallback():
+    env = os.environ.copy()
+    env["ALLOW_SYSTEM_CHANGES"] = "1"
+    env.pop("BUILD_MAVLINK_ROUTER_FROM_SOURCE", None)
+    result = subprocess.run(
+        ["bash", "-c", f'source "{SETUP}"; printf "%s" "$BUILD_MAVLINK_ROUTER_FROM_SOURCE"'],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert result.stdout == "1"
+
+
+def test_router_uses_source_fallback_when_apt_package_is_unavailable():
+    result = run_setup_function(
+        'ALLOW_SYSTEM_CHANGES=1\n'
+        'BUILD_MAVLINK_ROUTER_FROM_SOURCE=1\n'
+        'need_cmd() { return 1; }\n'
+        'require_sudo() { SUDO=(); }\n'
+        'build_mavlink_router_from_source() { echo "router source fallback called"; }\n'
+        'install_mavlink_router'
+    )
+    assert result.returncode == 0
+    assert "router source fallback called" in result.stdout
+
+
+def test_setup_attempts_mediamtx_before_optional_router_and_python():
+    result = run_setup_function(
+        'validate_venv_dir() { :; }\n'
+        'install_apt_packages() { echo apt; }\n'
+        'install_mediamtx() { echo mediamtx; }\n'
+        'install_mavlink_router() { echo router; }\n'
+        'install_python_packages() { echo python; }\n'
+        'verify_runtime_dependencies() { echo verify; }\n'
+        'print_summary() { echo summary; }\n'
+        'main'
+    )
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == [
+        "apt", "mediamtx", "router", "python", "verify", "summary"
+    ]

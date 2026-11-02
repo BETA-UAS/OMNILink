@@ -5,6 +5,10 @@ from core.config_models import VideoConfig, VideoSource
 from core.network_utils import command_exists, is_valid_network_port
 
 VIDEO_TYPE_RTSP = "RTSP"
+MAIN_CAMERA_URLS = (
+    "rtsp://192.168.144.25:8554/video1",  # MT11
+    "rtsp://192.168.144.25:554/",  # Viewpro
+)
 
 X264_PARAMS = (
     "nal-hrd=none:force-cfr=1:sliced-threads=1:sync-lookahead=0:rc-lookahead=0:bframes=0:ref=1"

@@ -1,11 +1,17 @@
 import logging
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from core.config_models import VideoConfig, VideoSource
 from core.diagnostics import SuppressingLogger
-from core.video_config import active_video_sources, build_ffmpeg_args, validate_video_config
+from core.video_config import (
+    MAIN_CAMERA_URLS,
+    active_video_sources,
+    build_ffmpeg_args,
+    validate_video_config,
+)
 from PyQt5 import QtCore
 
 STARTUP_GRACE_SEC = 8.0
@@ -93,6 +99,13 @@ class VideoManager(QtCore.QObject):
         self._publishers = {
             self._normalize_path(source.out_path): {
                 "source": source,
+                "source_urls": (
+                    MAIN_CAMERA_URLS
+                    if self._normalize_path(source.out_path) == "cam1"
+                    and source.input_text.strip() in MAIN_CAMERA_URLS
+                    else (source.input_text.strip(),)
+                ),
+                "source_index": 0,
                 "process": None,
                 "retry_timer": None,
                 "retry_index": 0,
@@ -209,8 +222,10 @@ class VideoManager(QtCore.QObject):
         if not config:
             return
         publish_url = f"rtsp://127.0.0.1:{int(config.out_port)}/{path}"
+        source_urls = record.get("source_urls") or (record["source"].input_text.strip(),)
+        source_url = source_urls[record.get("source_index", 0)]
         args = build_ffmpeg_args(
-            source=record["source"],
+            source=replace(record["source"], input_text=source_url),
             publish_url=publish_url,
             bitrate_kbps=int(config.global_bitrate_kbps),
             passthrough=self._passthrough,
@@ -241,7 +256,7 @@ class VideoManager(QtCore.QObject):
                 p, s, q, code, status
             )
         )
-        logging.info("Starting camera publisher %s", path)
+        logging.info("Starting camera publisher %s from %s", path, source_url)
         process.start("ffmpeg", args)
         self._emit_source_status()
 
@@ -279,8 +294,26 @@ class VideoManager(QtCore.QObject):
             return
         logging.warning("Camera %s publisher exited (code %d); waiting to retry", path, code)
         record["state"] = "waiting"
-        self._schedule_retry(path, session)
+        if self._advance_main_camera_source(record):
+            logging.info(
+                "Camera %s switching to %s",
+                path,
+                record["source_urls"][record["source_index"]],
+            )
+            QtCore.QTimer.singleShot(0, lambda p=path, s=session: self._start_publisher(p, s))
+        else:
+            self._schedule_retry(path, session)
         self._emit_source_status()
+
+    @staticmethod
+    def _advance_main_camera_source(record: dict) -> bool:
+        """Try the fallback immediately; back off after both URLs fail."""
+        urls = record.get("source_urls", ())
+        if len(urls) < 2:
+            return False
+        index = record.get("source_index", 0)
+        record["source_index"] = (index + 1) % len(urls)
+        return index == 0
 
     def _schedule_retry(self, path: str, session: int) -> None:
         record = self._publishers.get(path)

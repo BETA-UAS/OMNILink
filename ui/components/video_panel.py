@@ -1,12 +1,11 @@
 from typing import List
 
-from PyQt5 import QtCore, QtWidgets
-
 from core.config_models import VideoSource
-from core.video_config import VIDEO_TYPE_RTSP
+from core.video_config import MAIN_CAMERA_URLS, VIDEO_TYPE_RTSP
+from PyQt5 import QtCore, QtWidgets
 from ui.components.common import refresh_style, set_button_role, set_muted_label
 
-MAIN_CAMERA_URL = "rtsp://192.168.144.25:554/"
+MAIN_CAMERA_URL = MAIN_CAMERA_URLS[0]
 TAIL_CAMERA_URL = "rtsp://192.168.144.26:554/"
 AUX_CAMERA_URL = "rtsp://192.168.144.25:8554/main.264"
 AUX_CAMERA_HOSTS = ("192.168.144.25", "192.168.144.26")
@@ -28,9 +27,7 @@ def migrated_aux_camera_host(config: dict) -> str:
             candidates.extend(aux.get(key) for key in ("input_text", "url", "source_url"))
         elif isinstance(aux, str):
             candidates.append(aux)
-    candidates.extend(
-        video.get(key) for key in ("aux_camera_url", "aux_source_url", "cam3_url")
-    )
+    candidates.extend(video.get(key) for key in ("aux_camera_url", "aux_source_url", "cam3_url"))
     for candidate in candidates:
         text = str(candidate or "")
         for host in AUX_CAMERA_HOSTS:
@@ -153,10 +150,12 @@ class VideoPanel(QtWidgets.QFrame):
         text.setSpacing(1)
         name_label = QtWidgets.QLabel(name)
         name_label.setObjectName("sourceName")
-        secondary = {"cam1": "Camera 1", "cam2": "Camera 2"}.get(path, source_url)
+        secondary = {"cam1": "Camera 1 · MT11 / Viewpro auto", "cam2": "Camera 2"}.get(
+            path, source_url
+        )
         url_label = QtWidgets.QLabel(secondary)
         url_label.setObjectName("sourceAddress")
-        url_label.setToolTip(source_url)
+        url_label.setToolTip("\n".join(MAIN_CAMERA_URLS) if path == "cam1" else source_url)
         url_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         text.addWidget(name_label)
         text.addWidget(url_label)

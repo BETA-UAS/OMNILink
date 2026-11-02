@@ -9,9 +9,10 @@ INSTALL_MEDIAMTX="${INSTALL_MEDIAMTX:-1}"
 MEDIAMTX_BIN="${MEDIAMTX_BIN:-/usr/local/bin/mediamtx}"
 
 INSTALL_MAVLINK_ROUTER="${INSTALL_MAVLINK_ROUTER:-1}"
-BUILD_MAVLINK_ROUTER_FROM_SOURCE="${BUILD_MAVLINK_ROUTER_FROM_SOURCE:-0}"
 # System-wide package/binary changes are opt-in. A virtualenv is still created.
 ALLOW_SYSTEM_CHANGES="${ALLOW_SYSTEM_CHANGES:-0}"
+# A single opt-in also enables the router fallback when apt has no package.
+BUILD_MAVLINK_ROUTER_FROM_SOURCE="${BUILD_MAVLINK_ROUTER_FROM_SOURCE:-${ALLOW_SYSTEM_CHANGES}}"
 
 log() {
   printf '\n[OMNI-Link setup] %s\n' "$*"
@@ -120,20 +121,11 @@ install_apt_packages() {
     libxkbcommon-x11-0
   )
 
-  local mavlink_router_build_packages=(
-    build-essential
-    libsystemd-dev
-    meson
-    ninja-build
-    pkg-config
-  )
-
   log "Installing system packages"
   "${SUDO[@]}" apt-get update
   safe_apt_install \
     "${packages[@]}" \
-    "${qt_runtime_packages[@]}" \
-    "${mavlink_router_build_packages[@]}"
+    "${qt_runtime_packages[@]}"
 }
 
 install_mavlink_router() {
@@ -162,7 +154,7 @@ install_mavlink_router() {
     elif apt-cache show mavlink-routerd >/dev/null 2>&1; then
       safe_apt_install mavlink-routerd
     else
-      warn "mavlink-router package was not found in apt repositories. Building from source."
+      warn "mavlink-router package was not found in apt repositories."
     fi
   fi
 
@@ -172,10 +164,18 @@ install_mavlink_router() {
   fi
 
   if [[ "${BUILD_MAVLINK_ROUTER_FROM_SOURCE}" != "1" ]]; then
-    warn "mavlink-routerd is unavailable; automatic source builds are disabled. Set BUILD_MAVLINK_ROUTER_FROM_SOURCE=1 to opt in."
+    warn "mavlink-routerd is unavailable; source build was disabled with BUILD_MAVLINK_ROUTER_FROM_SOURCE=0."
     return
   fi
 
+  if need_cmd apt-get; then
+    safe_apt_install build-essential libsystemd-dev meson ninja-build pkg-config
+  fi
+
+  build_mavlink_router_from_source
+}
+
+build_mavlink_router_from_source() {
   if ! need_cmd git || ! need_cmd meson || ! need_cmd ninja; then
     warn "Cannot build mavlink-routerd because git/meson/ninja is missing."
     return
@@ -335,8 +335,12 @@ install_mediamtx() {
   trap cleanup_mediamtx_tmpdir RETURN
 
   log "Downloading MediaMTX"
-  curl -L "${url}" -o "${tmpdir}/mediamtx.tar.gz"
-  tar -xzf "${tmpdir}/mediamtx.tar.gz" -C "${tmpdir}"
+  curl --fail --location --retry 3 "${url}" -o "${tmpdir}/mediamtx.tar.gz"
+  tar -xzf "${tmpdir}/mediamtx.tar.gz" -C "${tmpdir}" mediamtx
+  if [[ ! -s "${tmpdir}/mediamtx" || -L "${tmpdir}/mediamtx" ]]; then
+    echo "MediaMTX archive does not contain a regular executable" >&2
+    return 1
+  fi
   "${SUDO[@]}" install -m 0755 "${tmpdir}/mediamtx" "${MEDIAMTX_BIN}"
 
   cleanup_mediamtx_tmpdir
@@ -367,8 +371,8 @@ Runtime checks:
   ping:             $(command -v ping || true)
 
 Optional environment flags:
-  ALLOW_SYSTEM_CHANGES=1 ./setup.sh  # opt in to guarded system installation
-  ALLOW_SYSTEM_CHANGES=1 BUILD_MAVLINK_ROUTER_FROM_SOURCE=1 ./setup.sh
+  ALLOW_SYSTEM_CHANGES=1 ./setup.sh  # install MediaMTX and router if missing
+  ALLOW_SYSTEM_CHANGES=1 BUILD_MAVLINK_ROUTER_FROM_SOURCE=0 ./setup.sh
   INSTALL_MEDIAMTX=0 ./setup.sh
   INSTALL_MAVLINK_ROUTER=0 ./setup.sh
 
@@ -383,9 +387,9 @@ main() {
   fi
   validate_venv_dir
   install_apt_packages
+  install_mediamtx
   install_mavlink_router
   install_python_packages
-  install_mediamtx
   verify_runtime_dependencies
   print_summary
 }

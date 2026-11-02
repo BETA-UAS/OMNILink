@@ -2,8 +2,8 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from core.video_config import MAIN_CAMERA_URLS
 from PyQt5 import QtWidgets
-
 from ui.components.video_panel import (
     AUX_CAMERA_HOSTS,
     AUX_CAMERA_URL,
@@ -35,6 +35,10 @@ def test_panel_has_exactly_three_fixed_camera_definitions():
         (AUX_CAMERA_URL, "cam3"),
     ]
     assert [source.enabled for source in sources] == [True, True, False]
+    assert MAIN_CAMERA_URLS == (
+        "rtsp://192.168.144.25:8554/video1",
+        "rtsp://192.168.144.25:554/",
+    )
     assert not hasattr(panel, "cb_manual_cam")
     assert not hasattr(panel, "ed_manual_cam")
 
@@ -90,9 +94,15 @@ def test_aux_source_ip_selector_changes_only_the_host():
 
 
 def test_saved_aux_host_migration_accepts_only_supported_hosts():
-    assert migrated_aux_camera_host(
-        {"video": {"sources": {"cam3": {"url": aux_camera_url("192.168.144.26")}}}}
-    ) == "192.168.144.26"
-    assert migrated_aux_camera_host(
-        {"video": {"sources": {"cam3": {"url": "rtsp://10.0.0.5/custom"}}}}
-    ) == "192.168.144.25"
+    assert (
+        migrated_aux_camera_host(
+            {"video": {"sources": {"cam3": {"url": aux_camera_url("192.168.144.26")}}}}
+        )
+        == "192.168.144.26"
+    )
+    assert (
+        migrated_aux_camera_host(
+            {"video": {"sources": {"cam3": {"url": "rtsp://10.0.0.5/custom"}}}}
+        )
+        == "192.168.144.25"
+    )
